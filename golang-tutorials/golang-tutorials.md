@@ -3478,13 +3478,200 @@ func main() {
 
 ## 9 网络编程篇
 
+### 9.1 Socket编程入门
+
+#### 1️⃣Dial函数及其使用
+
+##### 传统的Socket编程
+
+回顾C语言中编写网络程序时，以基于TCP协议的网络服务为例，客户端和服务端的实现流程通：
+
+![Socket 编程图示](images/15716418491219.jpg)
+
+从服务端来看，代码编写分为以下几个步骤：
+
+1. 建立并绑定 Socket：首先服务端使用 `socket()` 函数建立网络套接字，然后使用 `bind()` 函数为套接字绑定指定的 IP 和端口；
+2. 监听请求：接下来，服务端使用 `listen()` 函数监听客户端对绑定 IP 和端口的请求；
+3. 接收连接：如果有请求过来，并通过三次握手成功建立连接，则使用 `accept()` 函数接收并处理该连接；
+4. 处理请求与发送响应：服务端通过 `read()` 函数从上述已建立连接读取客户端发送的请求数据，经过处理后再通过 `write()` 函数将响应数据发送给客户端。
+
+从客户端来看，代码编写分为以下几个步骤：
+
+1. 建立 Socket：客户端同样使用 `socket()`函数建立网络套接字；
+2. 建立连接：然后调用 `connect()` 函数传入 IP 和端口号建立与指定服务端网络程序的连接；
+3. 发送请求与接收响应：连接建立成功后，客户端就可以通过 `write()` 函数向服务端发送数据，并使用 `read()` 函数从服务端接收响应。
+
+基于 UDP 协议的网络服务大致流程也是一样的，只是服务端和客户端之间不需要建立连接。
+
+Go 语言标准库对这个过程进行了抽象和封装，无论我们使用什么协议建立什么形式的连接，都只需要调用`net.Dial()` 函数就可以了，从而大大简化了代码的编写量。
+
+##### Dial()函数
+
+```go
+func Dial(network, address string) (Conn, error) {
+    var d Dialer
+    return d.Dial(network, address)
+}
+```
+
+其中 `network` 参数表示传入的网络协议（比如 `tcp`、`udp` 等），`address` 参数表示传入的 IP 地址或域名，而端口号是可选的，如果需要指定的话，以「`:`」的形式跟在地址或域名的后面就好了。如果连接成功，该函数返回连接对象，否则返回 `error`。
+
+几种常见协议的调用方式:
+
+1. TCP连接：
+
+```go
+conn, err := net.Dial("tcp", "192.168.10.10:80")
+```
+
+2. UDP连接：
+
+```go
+conn, err := net.Dial("udp", "192.168.10.10:8888")
+```
+
+3. ICMP连接（使用协议名称）：
+
+```go
+conn, err := net.Dial("ip4:icmp", "www.xueyuanjun.com")
+```
+
+4. ICMP连接（使用协议编号）：
+
+```go
+conn, err := net.Dial("ip4:1", "10.0.0.3")
+```
+
+> 注：`ip4` 表示 IPv4，相应的 `ip6` 表示 IPv6
+>
+> [协议编号的含义](https://www.iana.org/assignments/protocol-numbers/protocol-numbers.xml)
+
+目前，`Dial()` 函数支持如下几种网络协议：`tcp`、`tcp4`、`tcp6`、`udp`、`udp4`、`udp6`、`ip`、`ip4`、`ip6`、`unix`、`unixgram` 和 `unixpacket`，这些协议解释如下：
+
+- `tcp`：代表 TCP 协议，其基于的 IP 协议的版本根据参数 `address` 的值自适应。
+- `tcp4`：代表基于 IP 协议第四版的 TCP 协议。
+- `tcp6`：代表基于 IP 协议第六版的 TCP 协议。
+- `udp`：代表 UDP 协议，其基于的 IP 协议的版本根据参数 `address` 的值自适应。
+- `udp4`：代表基于 IP 协议第四版的 UDP 协议。
+- `udp6`：代表基于 IP 协议第六版的 UDP 协议。
+- `unix`：代表 Unix 通信域下的一种内部 socket 协议，以 `SOCK_STREAM` 为 socket 类型。
+- `unixgram`：代表 Unix 通信域下的一种内部 socket 协议，以 `SOCK_DGRAM` 为 socket 类型。
+- `unixpacket`：代表 Unix 通信域下的一种内部 socket 协议，以 `SOCK_SEQPACKET` 为 socket 类型。
+
+在成功建立连接后，我们就可以进行数据的发送和接收，发送数据时，使用连接对象 `conn` 的 `Write()` 方法，接收数据时使用 `Read()` 方法。
+
+
+
+##### TCP 示例程序
+
+
+
+#### 2️⃣Dial函数的底层实现及超时处理 🔖
+
+##### Dial 函数的底层调用
+
+实际上，`Dial()` 函数是对 `dialTCP()`、`dialUDP()`、`dialIP()` 和 `dialUnix()` 的封装，这可以通过追溯 `Dial()` 函数的源码看到，底层真正建立连接是通过 `dialSingle()` 函数完成的：
+
+![net.DialSingle函数底层实现](images/image-1571815485189.png)
+
+`dialSingle()` 函数通过从传入参数中获取网络协议类型调用对应的连接建立函数并返回连接对象。再往下追溯，可以看到这些底层函数最终都调用了 [syscall](https://golang.google.cn/pkg/syscall/) 包的 `Socket()` 函数与对应平台操纵系统的 Socket API 交互实现网络连接的建立，针对不同的通信协议，建立不同的连接类型：
+
+![syscall.Socket函数底册实现](images/image-1571815514911.png)
+
+其中 `domain` 代表通信域，支持 IPv4、IPv6 和 Unix，对应的常量值分别是 `syscall.AF_INET`、`syscall.AF_INET6` 和 `syscall.AF_UNIX`。
+
+> 注：IPv4 和 IPv6 分别代表 IP 协议网络的第四版和第六版，Unix 指的是类 Unix 操作系统中特有的通信域，在装有此类操作系统的同一台计算机中，应用程序可以基于此域建立 socket 连接。
+
+`typ` 代表 Socket 的类型，比如 TCP 对应的 Socket 类型常量是 `syscall.SOCK_STREAM`（面向连接通信），UDP 对应的 Socket 类型常量是 `syscall.SOCK_DGRAM`（面向无连接通信），此外还支持 `syscall.SOCK_RAW` 和 `syscall.SOCK_SEQPACKET` 两种类型，`SOCK_RAW` 其实就是原始的 IP 协议包，`SOCK_SEQPACKET` 与 `SOCK_STREAM` 类似，都是面向连接的，只不过前者有消息边界，传输的是数据包，而不是字节流。通常，我们使用 `SOCK_STREAM` 和 `SOCK_DGRAM` 居多。
+
+最后一个参数 `proto` 表示通信协议，一般默认为 `0`，因为该值可以通过前两个参数判断得出，比如，前两个参数值分别为 `syscall.AF_INET` 和 `syscall.SOCK_DGRAM` 的时候，会选择 UDP 作为通信协议，前两个参数值分别为 `syscall.AF_INET6` 和 `syscall.SOCK_STREAM` 时，会选择 TCP 作为通信协议。
+
+当然，我们在 Go 语言中编写网络程序时，完全不用关心这些底层的实现细节，只需要调用 `Dial` 函数并传入对应的参数就可以了。
+
+##### 网络超时处理
+
+###### 连接超时
+
+在使用 `Dial` 函数建立网络连接时，可以使用 [net](https://golang.google.cn/pkg/net/) 包提供的 `DialTimeout` 函数主动传入额外的超时参数来建立连接，该函数原型如下：
+
+```go
+func DialTimeout(network, address string, timeout time.Duration) (Conn, error) {
+    d := Dialer{Timeout: timeout}
+    return d.Dial(network, address)
+}
+```
+
+###### 请求和响应超时
+
+
+
+##### 更多工具函数
+
+
+
+```go
+// 函数验证 IP 地址的有效性
+func net.ParseIP()
+// 创建子网掩码
+func IPv4Mask(a, b, c, d byte) IPMask
+// 获取默认子网掩码
+func (ip IP) DefaultMask() IPMask
+// 根据域名查找对应IP地址
+func ResolveIPAddr(net, addr string) (*IPAddr, error) 
+func LookupHost(name string) (cname string, addrs []string, err error)
+```
+
+
+
+### 9.2 HTTP编程
+
+#### 1️⃣客户端如何发起HTTP请求
+
+
+
+
+
+#### 2️⃣http.Client底层实现剖析
+
+
+
+#### 3️⃣HTTP/HTTPS请求处理
+
+
+
+
+
+### 9.3 RPC编程
+
+#### 1️⃣客户端与服务端RPC调用的简单实现
+
+
+
+#### 2️⃣默认的编解码工具Gob使用介绍
+
+
+
+#### 3️⃣引入jsonrpc包通过JSON对RPC传输数据进行编解码
 
 
 
 
 
 
-## 数据结构和算法篇
+
+### 9.4 JSON处理
+
+#### 1️⃣JSON编解码基本使用入门
+
+
+
+#### 2️⃣未知结构JSON数据解码和JSON流式读写实现
+
+
+
+
+
+## 10 数据结构和算法篇
 
 
 
@@ -3495,6 +3682,8 @@ func main() {
 # Go Web编程
 
 [Go Web 编程](https://laravelacademy.org/books/go-web-programming)
+
+
 
 
 
