@@ -2756,13 +2756,287 @@ struct{}
 
 ### 7.1 error 类型及其使用
 
+#### Go语言错误处理机制
+
+```go
+type error interface { 
+    Error() string 
+}
+```
+
+其中只声明了一个 `Error()` 方法，用于返回字符串类型的错误消息。
+
+对于大多数函数或类方法，如果要返回错误，基本都可以定义成如下模式 —— 将错误类型作为第二个参数返回：
+
+```go
+func Foo(param int) (n int, err error) { 
+    // ...
+}
+```
+
+然后在调用返回错误信息的函数/方法时，按照如下「卫述语句」模板编写处理代码即可：
+
+```go
+n, err := Foo(0)
+
+if err != nil { 
+    // 错误处理 
+} else {
+    // 使用返回值 n 
+}
+```
+
+#### 返回错误实例并打印
+
+通过 Go 标准错误包 `errors` 提供的 `New()` 方法快速创建一个 `error` 类型的错误实例：
+
+```go
+package main
+
+import (
+   "errors"
+   "fmt"
+   "os"
+   "path/filepath"
+   "strconv"
+)
+
+func add(a, b int) (c int, err error) {
+   if a < 0 || b < 0 {
+      err = errors.New("只支持非负整数相加")
+      return
+   }
+   a *= 2
+   b *= 3
+   c = a + b
+   return
+}
+
+func main() {
+   if len(os.Args) != 3 {
+      fmt.Printf("Usage: %s num1 num2\n", filepath.Base(os.Args[0]))
+      return
+   }
+   x, _ := strconv.Atoi(os.Args[1])
+   y, _ := strconv.Atoi(os.Args[2])
+   // 通过多返回值捕获函数调用过程中可能的错误信息
+   z, err := add(x, y)
+   // 通过「卫述语句」处理后续业务逻辑
+   if err != nil {
+      fmt.Println(err)
+   } else {
+      fmt.Printf("add(%d, %d) = %d \n", x, y, z)
+   }
+}
+```
+
+```sh
+➜  ch07error git:(main) ✗ go run error.go 1 4 
+add(1, 4) = 14 
+➜  ch07error git:(main) ✗ go run error.go 1 -1
+只支持非负整数相加
+➜  ch07error git:(main) ✗ go run error.go     
+Usage: error num1 num2
+```
+
+
+
+上这种错误处理已经能够满足我们日常编写 Go 代码时大部分错误处理的需求了，事实上，Go 底层很多包进行错误处理时就是这样做的。此外，我们还可以通过 `fmt.Errorf()` 格式化方法返回 `error` 类型错误，其底层调用的其实也是 `errors.New` 方法：
+
+```go
+func Errorf(format string, a ...interface{}) error {
+    return errors.New(Sprintf(format, a...))
+}
+```
+
+#### 更复杂的错误类型
+
+##### 系统内置错误类型
+
+以 [os](https://golang.org/pkg/os) 包为例，这个包主要负责与操作系统打交道，所以提供了 `LinkError`、`PathError`、`SyscallError` 这些实现了 `error` 接口的错误类型，以 `PathError` 为例，顾名思义，它主要用于表示路径相关的错误信息，比如文件不存在，其底层类型结构信息如下：
+
+```go
+type PathError struct {
+    Op   string
+    Path string
+    Err  error
+}
+```
+
+
+
+```go
+// 获取指定路径文件信息，对应类型是 FileInfo
+// 如果文件不存在，则返回 PathError 类型错误
+fi, err := os.Stat("test.txt") 
+if err != nil {
+    switch err.(type) {
+    case *os.PathError:
+        // do something
+    case *os.LinkError:
+        // dome something
+    case *os.SyscallError:
+        // dome something
+    case *exec.Error:
+        // dome something
+    }
+} else {
+    // ...
+}
+```
+
+
+
+##### 自定义错误类型
+
 
 
 ### 7.2 defer 语句及其使用
 
+Go 语言中的类没有构造函数和析构函数的概念，处理错误和异常时也没有提供 `try...catch...finally` 之类的语法，那当我们想要在某个资源使用完毕后将其释放（网络连接、文件句柄等），或者在代码运行过程中抛出错误时执行一段兜底逻辑，要怎么做呢？
+
+通过 `defer` 关键字声明兜底执行或者释放资源的语句可以轻松解决这个问题。
+
+Go 内置的 [io/ioutil](https://golang.google.cn/pkg/io/ioutil/) 包提供的读取文件方法 `ReadFile` 实现源码，其中就有 `defer` 语句的使用：
+
+```go
+func ReadFile(filename string) ([]byte, error) {
+    f, err := os.Open(filename)
+    if err != nil {
+        return nil, err
+    }
+    defer f.Close()
+
+    var n int64 = bytes.MinRead
+
+    if fi, err := f.Stat(); err == nil {
+        if size := fi.Size() + bytes.MinRead; size > n {
+            n = size
+        }
+    }
+    return readAll(f, n)
+}
+```
+
+`defer` 修饰的 `f.Close()` 方法会在函数执行完成后或读取文件过程中抛出错误时执行，以确保已经打开的文件资源被关闭，从而避免内存泄露。如果一条语句干不完清理的工作，也可以在 `defer` 后加一个匿名函数来执行对应的兜底逻辑：
+
+```go
+defer func() { 
+    //  执行复杂的清理工作... 
+} ()
+```
+
+另外，一个函数/方法中可以存在多个 `defer` 语句，`defer` 语句的调用顺序遵循==先进后出==的原则，即最后一个 `defer` 语句将最先被执行，相当于「栈」这个数据结构，如果在循环语句中包含了 `defer` 语句，则对应的 `defer` 语句执行顺序依然符合先进后出的规则。
+
+由于 `defer` 语句的执行时机和调用顺序，所以我们要尽量在函数/方法的前面定义它们，以免在后面编写代码时漏掉，尤其是运行时抛出错误会中断后面代码的执行，也就感知不到后面的 `defer` 语句。
+
+
+
+```go
+func printError() {
+   fmt.Println("兜底执行")
+}
+
+func main() {
+   defer printError()
+   defer func() {
+      fmt.Println("除数不能是0！！！")
+   }()
+
+   var i = 1
+   var j = 1
+   var k = i / j
+   fmt.Printf("%d / %d = %d\n", i, j, k)
+}
+```
+
+![](images/image-20240507112824814.png)
+
+把 `j` 的值设置为 `0`，则函数会抛出 panic：
+
+![](images/image-20240507112910158.png)
+
+表示除数不能为零。这个时候，由于 `defer` 语句定义在抛出 panic 代码的前面，所以依然会被执行，底层的逻辑是在执行 `var k = i / j` 这条语句时，遇到除数为 0，则抛出 panic，然后立即中断当前函数 `main` 的执行（后续其他语句都不再执行），并按照先进后出顺序依次执行已经在当前函数中声明过的 `defer` 语句，最后打印出 panic 日志及错误信息。
+
 
 
 ### 7.3 panic 和 recover
+
+对于某些运行时错误，比如数组越界、除数为0、空指针引用等一些不可预见的，这些 Go 语言是怎么处理的呢？
+
+#### panic
+
+Go 语言没有像 Java、PHP 那样引入异常的概念，也没有提供 `try...catch` 这样的语法对运行时异常进行捕获和处理，当代码运行时出错，而又没有在编码时显式返回错误时，Go 语言会抛出 panic，中文译作「**运行时恐慌**」，我们也可以将其看作 Go 语言版的异常。
+
+除了像之前那样由 Go 语言底层抛出 panic，还可以在代码中显式抛出 panic，以便对错误和异常信息进行自定义：
+
+```go
+func main() {
+  	defer func() {
+        fmt.Println("代码清理逻辑")
+    }()
+   var i = 1
+   var j = 0
+
+   if j == 0 {
+      panic("除数不能为0！")
+   }
+
+   var k = i / j
+   fmt.Printf("%d / %d = %d\n", i, j, k)
+}
+```
+
+![](images/16152165511760.jpg)
+
+无论是 Go 语言底层抛出 panic，还是我们在代码中显式抛出 panic，处理机制都是一样的：当遇到 panic 时，Go 语言会中断当前协程（即 `main` 函数）后续代码的执行，然后执行在中断代码之前定义的 `defer` 语句（按照先入后出的顺序），最后程序退出并输出 panic 错误信息，以及出现错误的堆栈跟踪信息，也就是红框中的内容。
+
+第一行表示出问题的协程，第二行是问题代码所在的包和函数，第三行是问题代码的具体位置，最后一行则是程序的退出状态，通过这些信息，可以帮助你快速定位问题并予以解决。
+
+#### recover
+
+还可以通过 `recover()` 函数对 panic 进行捕获和处理，从而避免程序崩溃然后直接退出，而是继续可以执行后续代码，实现类似 Java、PHP 中 `try...catch` 语句的功能。
+
+由于执行到抛出 panic 的问题代码时，会中断后续其他代码的执行，所以，显然这个 panic 的捕获应该放到 `defer` 语句中完成，才可以在抛出 panic 时通过 `recover` 函数将其捕获，defer 语句执行完毕后，会退出抛出 panic 的当前函数，回调调用它的地方继续后续代码的执行。
+
+> 可以类比为 panic、recover、defer 组合起来实现了传统面向对象编程异常处理的 try…catch…finally 功能。
+
+```go
+package main
+
+import (
+    "fmt"
+)
+
+func divide() {
+    defer func() {
+        if err := recover(); err != nil {
+            fmt.Printf("Runtime panic caught: %v\n", err)
+        }
+    }()
+
+    var i = 1
+    var j = 0
+    k := i / j
+    fmt.Printf("%d / %d = %d\n", i, j, k)
+}
+
+func main() {
+    divide()
+    fmt.Println("divide 方法调用完毕，回到 main 函数")
+}
+```
+
+
+
+```sh
+$ go run recover.go 
+Runtime panic caught: runtime error: integer divide by zero
+divide 方法调用完毕，回到 main 函数
+
+```
+
+
 
 
 
