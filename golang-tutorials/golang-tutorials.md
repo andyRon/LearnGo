@@ -1896,54 +1896,715 @@ func itemsFilter(items []map[string]string, f func(map[string]string) bool) []ma
 
 - 基本类型，如 `byte`、`int`、`bool`、`float`、`string` 等；
 - 复合类型，如数组、切片、字典、指针、结构体等；
-- 可以指向任意对象的类型（Any 类型）；
+- 可以指向任意对象的类型（`Any` 类型）；
 - 值语义和引用语义；
 - 面向对象，即所有具备面向对象特征（比如成员方法）的类型；
 - 接口。
 
 类型系统描述的是这些内容在一个语言中如何被关联。因为 Java 语言自诞生以来被称为最纯正的面向对象语言，所以我们就先以 Java 语言为例讲一讲类型系统。
 
-#### Java vs Go 类型系统设计
+#### Java vs Go类型系统设计
 
+##### Java
 
+在 Java 语言中，存在两套完全独立的类型系统：
+
+- 一套是值类型系统，主要是基本类型，如 `byte`、`int`、`boolean`、`char`、`double` 等，这些类型基于值语义；
+- 一套是以 `Object` 类型为根的对象类型系统（类），可以定义成员变量、成员方法、虚函数（抽象函数）等，这些类型基于引用语义，只允许在堆上创建（通过关键字 `new`）。
+
+Java 语言中的 Any 类型就是整个对象类型系统的根 —— `java.lang.Object` 类型，只有对象类型系统中的实例才可以被 Any 类型引用。值类型想要被 Any 类型引用，需要经过装箱 （boxing）过程，比如 `int` 类型需要装箱成为 `Integer` 类型。
+
+另外，在 Java 中，只有对象类型系统中的类型才可以实现接口。
+
+##### Go
+
+相比之下，Go 语言中的大多数类型都是值语义，包括：
+
+- 基本类型，如布尔类型、整型、浮点型、字符串等；
+- 复合类型，如数组、结构体等（切片、字典、指针和通道都是引用语义）；
+
+> 这里的值语义和引用语义等价于之前介绍类型时提到的值类型和引用类型。
+
+###### 为值类型定义成员方法
+
+所有值语义类型都支持定义成员方法，包括内置基本类型。例如，我可以为整型新增比较方法 `Equal`，不过在此之前，需要将基本类型通过 `type` 关键字设置为新的类型：
+
+```go
+type Integer int
+
+func (a Integer) Equal(b Integer) bool {
+    return a == b
+}
+```
+
+这里，基于 `int` 设置了 `Integer` 类型（这是一个新类型，不是类型别名），在使用的时候也要通过 `Integer` 类型进行声明，不过本质上它仍然是一个整型数字，可以把具体的数值看做是 `Integer` 类型的实例。
+
+可以在整型类型上调用 `Equal` 方法了：
+
+```go
+func main() {
+	var x Integer
+	var y Integer
+	x, y = 10, 11
+	fmt.Println(x.Equal(y))
+}
+```
+
+这有点像 Java 的装箱功能。当然了，你还可以为 `Integer` 类型添加更多方法：
+
+```go
+// 加法
+func (a Integer) Add(b Integer) Integer {
+    return a + b
+}
+
+// 乘法
+func (a Integer) Multiply(b Integer) Integer {
+    return a * b
+}
+```
+
+这样一来，就将基本的数字类型就转化成了面向对象类型。
+
+###### 接口实现 🔖
+
+而在实现某个接口时，只需要实现该接口要求的所有方法即可，无需显式声明实现的接口（实际上，Go 语言根本就不支持传统面向对象编程中的继承和实现语法）。例如，如果有如下这个接口存在：
+
+```go
+type Math interface {
+    Add(i Integer) Integer
+    Multiply(i Integer) Integer
+}
+```
+
+则认为 `Integer` 实现了 `Math` 接口，无需显式声明。
+
+###### 任意类型
+
+任何类型都可以被 Any 类型引用。在 Go 语言中，Any 类型就是空接口，即 `interface{}`。
 
 ### 6.2 类的定义、初始化和成员方法
 
+#### 类的定义和初始化
 
+Go借助**结构体**来实现类的声明，比如要定义一个学生类:
+
+```go
+type Student struct {
+    id uint
+    name string
+    male bool
+    score float64
+}
+```
+
+类名为 `Student`，并且包含了 `id`、`name`、`male`、`score` 四个属性。
+
+Go 语言中也不支持构造函数、析构函数，取而代之地，可以通过定义形如 `NewXXX` 这样的全局函数（首字母大写）作为类的初始化函数：
+
+```go
+func NewStudent(id uint, name string, male bool, score float64) *Student {
+    return &Student{id, name, male, score}
+}
+```
+
+在这个函数中，我们通过传入的属性字段对 `Student` 类进行初始化并返回一个指向该类的指针，除此之外，还可以初始化指定字段：
+
+```go
+func NewStudent(id uint, name string, score float64) *Student {
+    return &Student{id: id, name:name, score:score}
+}
+```
+
+> 在 Go 语言中，未进行显式初始化的变量都会被初始化为该类型的零值，例如 `bool` 类型的零值为 `false`，`int` 类型的零值为 0，`string` 类型的零值为空字符串，`float` 类型的零值为 `0.0`。
+
+```go
+student := NewStudent(1, "andyron", 100)
+fmt.Println(student)
+```
+
+```sh
+&{1 andyron false 100}
+```
+
+#### 定义成员方法
+
+##### 值方法
+
+由于 Go 语言不支持 `class` 这样的代码块，要为 Go 类定义成员方法，需要在 `func` 和方法名之间声明**方法所属的类型**（有的地方将其称之为**接收者声明**），以 `Student` 类为例，要为其定义获取 `name` 值的方法，可以这么做：
+
+```go
+func (s Student) GetName() string  {
+    return s.name
+}
+```
+
+```go
+student := NewStudent(1, "andyron", 100)
+fmt.Println(student.GetName())
+```
+
+##### 指针方法
+
+在类的成员方法中，可以通过声明的类型变量来访问类的属性和其他方法（Go 语言不支持隐藏的 `this` 指针，所有的东西都是显式声明）。`GetName` 是一个只读方法，如果我们要在外部通过 `Student` 类暴露的方法设置 `name` 值，可以这么做：
+
+```go
+func (s *Student) SetName(name string) {
+    s.name = name
+}
+```
+
+使用`s *Student`，因为 Go 语言面向对象编程不像 PHP、Java 那样支持隐式的 `this` 指针，所有的东西都是显式声明的，在 `GetXXX` 方法中，由于不需要对类的成员变量进行修改，所以不需要传入指针，而 `SetXXX` 方法需要在函数内部修改成员变量的值，并且该修改要作用到该函数作用域以外，所以需要传入指针类型（结构体是值类型，不是引用类型，所以需要显式传入指针）。
+
+我们可以把接收者类型为指针的成员方法叫做**==指针方法==**，把接收者类型为非指针的成员方法叫做**==值方法==**，二者的区别在于值方法传入的结构体变量是值类型（类型本身为指针类型除外），因此传入函数内部的是外部传入结构体实例的值拷贝，修改不会作用到外部传入的结构体实例。
+
+
+
+##### 值方法和指针方法的区别
+
+需要声明的是，在 Go 语言中，当我们将成员方法 `SetName` 所属的类型声明为指针类型时，严格来说，该方法并不属于 `Student` 类，而是属于指向 `Student` 的指针类型，所以，归属于 `Student` 的成员方法只是 `Student` 类型下所有可用成员方法的子集，归属于 `*Student` 的成员方法才是 `Student` 类完整可用方法的集合。
+
+在调用值方法和指针方法时，需要记住以下两条准则：
+
+1. 值方法可以通过指针和值类型实例调用，指针类型实例调用值方法时会自动解引用；
+2. 指针方法只能通过指针类型实例调用，但有一个例外，如果某个值是可寻址的（或者说左值），那么编译器会在值类型实例调用指针方法时自动插入取地址符，使得在此情形下看起来像指针方法也可以通过值来调用。
+
+🔖
+
+##### 定义值方法还是指针方法
+
+当我们有如下情形的考量时，需要将类方法定义为指针方法：
+
+1. 数据一致性：方法需要修改传入的类型实例本身；
+2. 方法执行效率：如果是值方法，在方法调用时一定会产生值拷贝，而大对象拷贝代价很大。
+
+通常我们都会选择定义指针方法。
+
+
+
+##### Go 版 toString 方法实现
+
+Go语言类的toString方法名是`String`，可以自定义：
+
+```go
+func (s Student) String() string {
+    return fmt.Sprintf("{id: %d, name: %s, male: %t, score: %f}",
+        s.id, s.name, s.male, s.score)
+}
+```
+
+
+
+```
+{id: 1, name: andyron, male: false, score: 100.000000}
+```
 
 
 
 ### 6.3 通过组合实现类的继承和方法重写
 
+#### 封装
+
+
+
+#### 继承
+
+==组合==，就是将一个类型嵌入到另一个类型，从而构建新的类型结构。
+
+> 传统面向对象编程中，显式定义继承关系的弊端有两个：一个是导致类的层级越来越复杂，另一个是影响了类的扩展性，很多软件设计模式的理念就是通过组合来替代继承提高类的扩展性。
+
+```go
+type Animal struct {
+	Name string
+}
+
+func (a Animal) Call() string {
+	return "动物的叫声...."
+}
+
+func (a Animal) FavorFood() string {
+	return "爱吃的食物...."
+}
+
+func (a Animal) GetName() string {
+	return a.Name
+}
+
+type Dog struct {
+	Animal
+}
+
+func main() {
+	animal := Animal{"草狗"}
+	dog := Dog{animal}
+
+	fmt.Println(dog.GetName())
+	fmt.Println(dog.Call())
+	fmt.Println(dog.FavorFood())
+}
+```
+
+```
+草狗
+动物的叫声....
+爱吃的食物....
+```
+
+
+
+#### 多态
+
+还可以通过在子类中定义同名方法来覆盖父类方法的实现，在面向对象编程中这一术语叫做**方法重写**，比如在上述 `Dog` 类型中，我们可以重写 `Call` 方法和 `FavorFood` 方法的实现如下：
+
+```go
+func (d Dog) Call() string {
+	return "汪汪汪"
+}
+func (d Dog) FavorFood() string {
+	return "骨头和鱼"
+}
+```
+
+```
+草狗
+汪汪汪
+骨头和鱼
+```
+
+调用父类 `Animal` 中的方法：
+
+```go
+fmt.Println(dog.Animal.Call())
+fmt.Println(dog.Animal.FavorFood())
+```
+
+Go语言中没有专门提供引用父类实例的关键字（`super`、`parent` 等），设计哲学一切从简，没有一个多余的关键字，**所有的调用都是所见即所得**。
+
+这种同一个方法在不同情况下具有不同的表现方式，就是**多态**，在传统面向对象编程中，多态还有另一个非常常见的使用场景 —— 类对接口的实现。
+
+#### 更多细节🔖
+
+可以看到，与传统面向对象编程语言的继承机制不同，这种组合的实现方式更加灵活，我们不用考虑单继承还是多继承，你想要继承哪个类型的方法，直接组合进来就好了。
+
+##### 多继承同名方法冲突处理
+
+
+
+##### 调整组合位置改变内存布局
+
+
+
+##### 继承指针类型的属性和方法
+
+```go
+type Dog struct { 
+    *Animal
+    Pet
+}
+```
+
+
+
+##### 为组合类型设置别名
 
 
 
 
-### 6.4 类属性和成员方法的可见性 🔖
+
+### 6.4 类属性和成员方法的可见性 
+
+Go 语言不是典型的面向对象编程语言，并且语言本身的设计哲学也非常简单，惜字（关键字）如金，没有提供上面这三个关键字，也没有提供以类为维度管理属性和方法可见性的机制，但是 Go 语言确实有可见性的概念，只不过这个可见性是基于包这个维度的。
+
+#### Go语言的包管理和基本特性 🔖
+
+包概念可以类比为PHP中遵循 PSR4 风格的代码中命名空间的概念进行理解，包是程序代码的逻辑概念，通常把处理同一类型业务的代码放到同一个包中，包落到物理实体就是存放源代码的文件系统目录，因此我们可以把归属于同一个目录的文件看作归属于同一个包，这与命名空间有异曲同工之效。
+
+Go 语言基于包为单位组织和管理源码，因此变量、类属性、函数、成员方法的可见性都是基于包这个维度的。包与文件系统的目录结构存在映射关系（和命名空间一样）：
+
+- 在引入 Go Modules 以前，Go 语言会基于 `GOPATH` 这个系统环境变量配置的路径为根目录（可能有多个），然后依次去对应路径下的 `src` 目录下根据包名查找对应的文件目录，如果目录存在，则再到该目录下的源文件中查找对应的变量、类属性、函数和成员方法；
+- 在启用 Go Modules 之后，不再依赖 `$GOPATH` 定位包，而是基于 `go.mod` 中 `module` 配置值作为根路径，在该模块路径下，根据包名查找对应目录，如果存在，则继续到该目录下的源文件中查找对应变量、类属性、函数和成员方法。
+
+在 Go 语言中，你可以通过 `import` 关键字导入官方提供的包、第三方包、以及自定义的包，导入第三方包时，还需要通过 `go get` 指令下载才能使用，如果基于 Go Modules 管理项目的话，这个依赖关系会自动维护到 `go.mod` 中。
+
+归属同一个包的 Go 代码具备以下特性：
+
+- 归属于同一个包的源文件包声明语句要一致，即同一级目录的源文件必须属于同一个包；
+- 在同一个包下不同的源文件中不能重复声明同一个变量、函数和类（结构体）；
+
+另外，需要注意的是 `main` 函数作为程序的入口函数，只能存在于 `main` 包中。
+
+#### Go语言的类属性和成员方法可见性设置
+
+在 Go 语言中，无论是变量、函数还是类属性和成员方法，它们的可见性都是**以包为维度的**，而不是类似传统面向编程那样，类属性和成员方法的可见性封装在所属的类中，然后通过 `private`、`protected` 和 `public` 这些关键字来修饰其可见性。
+
+Go 语言没有提供这些关键字，不管是变量、函数，还是自定义类的属性和成员方法，它们的可见性都是根据其**==首字母的大小写==**来决定的，如果变量名、属性名、函数名或方法名首字母大写，就可以在包外直接访问这些变量、属性、函数和方法，否则只能在包内访问，因此 Go 语言类属性和成员方法的可见性都是包一级的，而不是类一级的。
 
 
 
-### 6.5 接口定义及实现🔖
+
+
+#### 通过私有化属性提升代码的安全性
+
+
+
+
+
+### 6.5 接口定义及实现
 
 **如果说 goroutine 和 channel 是支撑起 Go 语言并发模型的基石，那么接口就是 Go 语言整个类型系统的基石**。
 
 #### 传统侵入式接口实现
 
+以 Java、PHP 为例，接口主要作为不同类之间的契约（Contract）存在，对契约的实现是强制的，体现在具体的细节上就是如果一个类实现了某个接口，就必须实现该接口声明的所有方法，这个叫「履行契约」。
 
 
-#### Go 语言的接口实现
+
+**侵入式接口**，所谓「侵入式」指的是实现类必须明确声明自己实现了某个接口。
+
+这种实现方式虽然足够明确和简单明了，但也存在一些问题，尤其是在设计标准库的时候，因为标准库必然涉及到接口设计，接口的需求方是业务实现类，只有具体编写业务实现类的时候才知道需要定义哪些方法，而在此之前，标准库的接口就已经设计好了，我们要么按照约定好的接口进行实现，如果没有合适的接口需要自己去设计，这里的问题就是==接口的设计==和==业务的实现==是分离的，接口的设计者并不能总是预判到业务方要实现哪些功能，这就造成了==设计与实现的脱节==。
+
+接口的过分设计会导致某些声明的方法实现类完全不需要，如果设计的太简单又会导致无法满足业务的需求，这确实是一个问题，而且脱离了用户使用场景讨论这些并没有意义，以 PHP自带的 [SessionHandlerInterface](https://www.php.net/manual/zh/class.sessionhandlerinterface.php) 接口为例：
+
+```php
+SessionHandlerInterface {
+    /* 方法 */
+    abstract public close ( void ) : bool
+    abstract public destroy ( string $session_id ) : bool
+    abstract public gc ( int $maxlifetime ) : int
+    abstract public open ( string $save_path , string $session_name ) : bool
+    abstract public read ( string $session_id ) : string
+    abstract public write ( string $session_id , string $session_data ) : bool
+}
+```
+
+用户自定义的 Session 管理器需要实现该接口，也就是要实现该接口声明的所有方法，但是实际在做业务开发的时候，某些方法其实并不需要实现，比如如果我们基于 Redis 或 Memcached 作为 Session 存储器的话，它们自身就包含了过期回收机制，所以 `gc` 方法根本不需要实现，又比如 `close` 方法对于大部分驱动来说，也是没有什么意义的。
+
+正是因为这种不合理的设计，所以在编写 PHP 类库中的每个接口时都需要纠结以下两个问题（Java 也类似）：
+
+1. 一个接口需要声明哪些接口方法？
+2. 如果多个类实现了相同的接口方法，应该如何设计接口？比如上面这个 `SessionHandlerInterface`，有没有必要拆分成多个更细分的接口，以适应不同实现类的需要？
 
 
+
+#### Go语言的接口实现
+
+在 Go 语言中，类对接口的实现和子类对父类的继承一样，并没有提供类似 `implement` 这种关键字显式声明该类实现了哪个接口，**一个类只要实现了某个接口要求的所有方法，我们就说这个类实现了该接口**。
+
+例如，我们定义了一个 `File` 类，并实现了 `Read()`、`Write()`、`Seek()`、`Close()` 四个方法：
+
+```go
+type File struct { 
+    // ...
+}
+
+func (f *File) Read(buf []byte) (n int, err error) 
+func (f *File) Write(buf []byte) (n int, err error) 
+func (f *File) Seek(off int64, whence int) (pos int64, err error) 
+func (f *File) Close() error
+```
+
+假设我们有如下接口（Go 语言通过关键字 `interface` 来声明接口，以示和结构体类型的区别，花括号内包含的是待实现的方法集合）：
+
+```go
+type IFile interface { 
+    Read(buf []byte) (n int, err error) 
+    Write(buf []byte) (n int, err error) 
+    Seek(off int64, whence int) (pos int64, err error) 
+    Close() error 
+}
+
+type IReader interface { 
+    Read(buf []byte) (n int, err error) 
+}
+
+type IWriter interface { 
+    Write(buf []byte) (n int, err error) 
+}
+
+type ICloser interface { 
+    Close() error 
+}
+```
+
+尽管 `File` 类并没有显式实现这些接口，甚至根本不知道这些接口的存在，但是我们说 `File` 类实现了这些接口，因为 `File` 类实现了上述所有接口声明的方法。当一个类的成员方法集合包含了某个接口声明的所有方法，换句话说，**如果一个接口的方法集合是某个类成员方法集合的子集，我们就认为该类实现了这个接口。**
+
+与 Java、PHP 相对，我们把 Go 语言的这种接口称作**非侵入式接口**，因为类与接口的实现关系不是通过显式声明，而是系统根据两者的方法集合进行判断。这样做有两个好处：
+
+- 其一，Go 语言的标准库不需要绘制类库的继承/实现树图，在 Go 语言中，类的继承树并无意义，你只需要知道这个类实现了哪些方法，每个方法是干什么的就足够了。
+- 其二，定义接口的时候，只需要关心自己应该提供哪些方法即可，不用再纠结接口需要拆得多细才合理，也不需要为了实现某个接口而引入接口所在的包，接口由使用方按需定义，不用事先设计，也不用考虑之前是否有其他模块定义过类似接口。
+
+这样一来，就完美地避免了传统面向对象编程中的接口设计问题。
 
 #### 通过组合实现接口继承
+
+传统接口继承：
+
+```php
+interface A 
+{
+    public function foo();
+}
+
+interface B extends A
+{
+    public function bar();
+}
+```
+
+go语言通过组合方式实现接口继承：
+
+```go
+type A interface {
+    Foo()
+}
+
+type B interface {
+    A
+    Bar()
+}
+```
+
+一个类 `T` 实现接口 `B`：
+
+```go
+type T struct {}
+
+func (t T) Foo() {
+    fmt.Println("call Foo function from interface A.")
+}
+
+func (t T) Bar() {
+    fmt.Println("call Bar function from interface B.")
+}
+```
+
+上面的 `T` 类可以只实现 `Foo` 方法，也可以只实现 `Bar` 方法，也可以都不实现。
+
+如果只实现了 `Foo` 方法，则 `T` 实现了接口 `A`；
+
+如果只实现了 `Bar` 方法，则既没有实现接口 `A` 也没有实现接口 `B`；
+
+只有两个方法都实现了系统才会判定实现了接口 `B`。
+
+可以认为接口组合是匿名类型组合（没有显式为组合类型设置对应的属性名称）的一个特定场景，只不过接口只包含方法，而不包含任何属性。Go 语言底层很多包就是基于接口组合实现的，比如 [io](https://golang.google.cn/pkg/io/) 里面的 `Reader`、`Writer`、`ReadWriter` 这些接口：
+
+```go
+type Reader interface {
+    Read(p []byte) (n int, err error)
+}
+
+type Writer interface {
+    Write(p []byte) (n int, err error)
+}
+
+type ReadWriter interface {
+    Reader
+    Writer
+}
+```
 
 
 
 ### 6.6 接口赋值
 
+和其他编程语言一样，Go 接口不支持直接实例化，因为它只是一个契约而已，只能通过具体的类来实现接口声明的所有方法。
+
+不同之处在于，Go 接口支持赋值操作，从而快速实现接口与实现类的映射，与之相比，Java、PHP 要实现接口与实现类的映射，只能基于 IoC 容器通过依赖注入实现，要复杂的多。
+
+接口赋值在 Go 语言中分为如下两种情况：
+
+#### 1️⃣将类实例赋值给接口
+
+##### 只包含值方法
+
+```go
+type Integer int
+
+// 加法运算
+func (a Integer) Add(b Integer) Integer {
+    return a + b
+}
+
+// 乘法运算
+func (a Integer) Multiply(b Integer) Integer {
+    return a * b
+}
+
+type Math interface {
+    Add(i Integer) Integer
+    Multiply(i Integer) Integer
+}
+```
+
+按照 Go 语言的约定，`Integer` 类型实现了 `Math` 接口。然后我们可以这样将 `Integer` 类型的实例 `a` 直接赋值给 `Math` 接口类型的变量 `m`：
+
+```go
+var a Integer = 1 
+var m Math = a
+fmt.Println(m.Add(1))
+```
+
+对于值方法而言，进行接口赋值时传递 `a` 实例的指针引用也是可以的：
+
+```go
+var a Integer = 1 
+var m Math = &a
+fmt.Println(m.Add(1))
+```
+
+因为对于非指针方法，Go 底层会自动生成一个与之对应的指针成员方法：🔖
+
+```go
+func (a *Integer) Add(i Integer) Integer { 
+    return (*a).Add(i) 
+}
+
+func (a *Integer) Multiply(i Integer) Integer { 
+    return (*a).Multiply(i) 
+}
+```
 
 
-### 6.7 类型断言
+
+##### 包含指针方法
+
+如果 `Integer` 类型中包含了归属于指针的实现方法：
+
+```go
+type Integer int
+
+func (a *Integer) Add(b Integer) {
+    *a = (*a) + b
+}
+
+func (a Integer) Multiply(b Integer) Integer {
+    return a * b
+}
+
+type Math interface {
+    Add(i Integer)
+    Multiply(i Integer) Integer
+}
+```
+
+那么在做接口赋值时，就只能传递指针类型的变量了：
+
+```go
+var a Integer = 1
+var m Math = &a
+m.Add(2)
+fmt.Printf("1 + 2 = %d\n", a)
+```
+
+🔖
+
+
+
+#### 2️⃣将接口赋值给接口
+
+在 Go 语言中，只要两个接口拥有相同的方法列表（与顺序无关），那么它们就是等同的，可以相互赋值。不过，这里有一个前提，那就是接口变量持有的是基于对应实现类的实例值，所以接口与接口间的赋值是基于类实例与接口间的赋值的。
+
+##### 完全对等
+
+```go
+type Number1 interface {
+    Equal(i int) bool
+    LessThan(i int) bool
+    MoreThan(i int) bool
+}
+
+
+type Number2 interface {
+    Equal(i int) bool
+    MoreThan(i int) bool
+    LessThan(i int) bool
+}
+```
+
+两个接口相同。
+
+```go
+type Number int
+
+func (n Number) Equal(i int) bool {
+    return int(n) == i
+}
+
+func (n Number) LessThan(i int) bool {
+    return int(n) < i
+}
+
+func (n Number) MoreThan(i int) bool {
+    return int(n) > i
+}
+```
+
+下面这些赋值代码都是合法的，会编译通过：
+
+```go
+var num1 Number = 1
+var num2 Number1 = num1 
+var num3 Number2 = num2
+```
+
+##### 方法子集
+
+接口赋值并不要求两个接口完全等价（方法完全相同）。如果接口 A 的方法列表是接口 B 的方法列表的子集，那么接口 B 也可以赋值给接口 A。
+
+假设 `Number2` 接口定义如下：
+
+```go
+type Number2 interface {
+    Equal(i int) bool
+    MoreThan(i int) bool
+    LessThan(i int) bool
+    Add(i int)
+}
+```
+
+要让 `Number` 类继续保持实现这两个接口，需要在 `Number` 类定义中新增一个 `Add` 方法实现（这里定义了一个指针方法）：
+
+```go
+func (n *Number) Add(i int) {
+    *n = *n + Number(i)
+}
+```
+
+```go
+var num1 Number = 1
+var num2 Number2 = &num1
+var num3 Number1 = num2 
+```
+
+反过来不行：
+
+```go
+var num1 Number = 1
+var num2 Number1 = &num1
+var num3 Number2 = num2   // 这一段编译出错
+```
+
+因为 `Number1` 接口中没有声明 `Add` 方法，或者换句话说，实现了 `Number2` 接口的类肯定实现了 `Number1`，但是实现了 `Number1` 接口的类不一定实现了 `Number2`。🔖
+
+这一点和 Java、PHP 中子类实例可以直接赋值给父类变量，而父类实例不能直接赋值给子类变量有异曲同工之妙。
+
+
+
+### 6.7 类型断言  🔖
+
+在 Java、PHP 等中，提供了 `instanceof` 关键字来进行接口和类型的断言，这种断言其实就是判定一个对象是否是某个类（包括父类）或接口的实例。
+
+Go语言通过类型断言运算符 `.(type)` 来实现，其中 `type` 对应的就是要断言的类型。
+
+#### 接口类型断言
+
+
+
+#### 结构体类型断言
+
+
+
+#### 基于反射动态断言类型
 
 
 
@@ -1951,7 +2612,143 @@ func itemsFilter(items []map[string]string, f func(map[string]string) bool) []ma
 
 ### 6.8 空接口、反射和泛型
 
+在 Go 语言中，类与接口的实现关系是通过类所实现的方法在编译期推断出来的，如果我们定义一个空接口的话，那么显然所有的类都实现了这个接口，反过来，我们也可以通过空接口来指向任意类型，从而实现类似 Java 中 `Object` 类所承担的功能，而且显然 Go 的空接口实现更加简洁，通过一个简单的字面量即可完成：
 
+```go
+interface{}
+```
+
+> 需要注意的是空接口和接口零值不是一个概念，前者是 `interface{}`，后者是 `nil`。
+
+
+
+#### 1️⃣空接口的基本使用
+
+##### 指向任意类型变量
+
+```go
+// 基本类型
+var v1 interface{} = 1 // 将 int 类型赋值给 interface{} 
+var v2 interface{} = "张三" // 将 string 类型赋值给 interface{} 
+var v3 interface{} = true  // 将 bool 类型赋值给 interface{}
+
+// 复合类型
+var v4 interface{} = &v2 // 将指针类型赋值给 interface{} 
+var v5 interface{} = []int{1, 2, 3}  // 将切片类型赋值给 interface{} 
+var v6 interface{} = struct {   // 将结构体类型赋值给 interface{}
+    id int
+    name string
+}{1, "张三"} 
+```
+
+
+
+##### 声明任意类型参数
+
+空接口最典型的使用场景就是用于声明函数支持任意类型的参数，比如 Go 语言标准库 [fmt](https://golang.google.cn/pkg/fmt/) 中的打印函数就是这样实现的：
+
+```go
+func Printf(fmt string, args ...interface{}) 
+func Println(args ...interface{}) ...
+func (p *pp) printArg(arg interface{}, verb rune)
+```
+
+##### 实现更灵活的类型断言
+
+类型断言运算符 `.` 左侧的变量必须是接口类型，而空接口可以表示任何类型，所以我们可以基于空接口将其他类型变量转化为空接口类型，这样，就不必单独引入 `IAnimal` 接口了：
+
+```go
+var animal = NewAnimal("中华田园犬")
+var pet = NewPet("泰迪")
+var any interface{} = NewDog(&animal, pet)
+if dog, ok := any.(Dog); ok {
+    fmt.Println(dog.GetName())
+    fmt.Println(dog.Call())
+    fmt.Println(dog.FavorFood())
+    fmt.Println(reflect.TypeOf(dog))
+}
+```
+
+
+
+#### 2️⃣反射
+
+很多现代高级编程语言都提供了对反射的支持，通过反射，可以在运行时动态获取变量的类型和结构信息，然后基于这些信息做一些非常灵活的工作，一个非常典型的反射应用场景就是 IoC 容器。
+
+Go提供了一个 `reflect` 包用于提供反射相关的 API，格式化输出标准库 `fmt` 底层就大量使用了反射。
+
+##### 使用示例
+
+```go
+package main
+
+import (
+	"fmt"
+	. "goDemo/ch06object/animal"
+	"reflect"
+)
+
+func main() {
+	animal := NewAnimal("中华田园犬")
+	pet := NewPet("泰迪")
+	dog := NewDog(&animal, pet)
+
+	// 返回的是 reflect.Type 类型值
+	dogType := reflect.TypeOf(dog)
+	fmt.Println("dog type: ", dogType)
+
+	// 返回的是 dog 指针对应的 reflect.Value 类型值
+	dogValue := reflect.ValueOf(&dog).Elem()
+
+	// 获取 dogValue 的所有属性
+	fmt.Println("================ Props ================")
+	for i := 0; i < dogValue.NumField(); i++ {
+		// 获取属性名
+		fmt.Println("name:", dogValue.Type().Field(i).Name)
+		// 获取属性类型
+		fmt.Println("type:", dogValue.Type().Field(i).Type)
+		// 获取属性值
+		fmt.Println("value:", dogValue.Field(i))
+	}
+
+	// 获取 dogValue 的所有方法
+	fmt.Println("================ Methods ================")
+	for j := 0; j < dogValue.NumMethod(); j++ {
+		// 获取方法名
+		fmt.Println("name:", dogValue.Type().Method(j).Name)
+		// 获取方法类型
+		fmt.Println("type:", dogValue.Type().Method(j).Type)
+		// 调用该方法
+		fmt.Println("exec result:", dogValue.Method(j).Call([]reflect.Value{}))
+	}
+}
+```
+
+
+
+可以通过反射获取变量的所有未知结构信息，以结构体为例（基本类型只有类型和值，更加简单），包括其属性、成员方法的名称和类型，值和可见性，还可以动态修改属性值以及调用成员方法。
+
+不过这种灵活是有代价的，因为所有这些解析工作都是在运行时而非编译期间进行，所以势必对程序性能带来负面影响，而且可以看到，反射代码的可读性和可维护性比起正常调用差很多，最后，反射代码出错不能在构建时被捕获，而是在运行时以恐慌的形式报告，这意味着反射错误有可能使你的程序崩溃。
+
+所以，如果有其他更好解决方案的话，尽量不要使用反射。
+
+##### 基于空接口和反射实现泛型 🔖
+
+在某些场景下，目前只能使用反射来实现，比如范型，因为现在 Go 官方尚未在语法层面提供对泛型的支持，我们只能通过空接口结合反射来实现。
+
+
+
+
+
+#### 3️⃣空结构体
+
+空的结构体类型定义：
+
+```go
+struct{}
+```
+
+表示没有任何属性和成员方法的空结构体，该类型的实例值只有一个，那就是 `struct{}{}`，这个值在 Go 程序中永远只会存一份，并且占据的内存空间是 `0`，当我们在并发编程中，将通道（channel）作为传递简单信号的介质时，使用 `struct{}` 类型来声明最好不过。
 
 
 
