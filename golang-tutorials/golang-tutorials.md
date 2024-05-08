@@ -3683,7 +3683,620 @@ func LookupHost(name string) (cname string, addrs []string, err error)
 
 [Go Web 编程](https://laravelacademy.org/books/go-web-programming)
 
+## 1 快速入门
 
+### 创建第一个 Go Web 应用
+
+
+
+
+
+## 2 路由分发
+
+### 2.1 Go语言HTTP请求处理的底层机制
+
+Go实现的HTTP服务器底层工作流程：
+
+1. 创建 Listen Socket，监听指定的端口，等待客户端请求到来；
+2. Listen Socket 接收客户端的请求，得到 Client Socket，接下来通过 Client Socket 与客户端通信；
+3. 处理客户端的请求，首先从 Client Socket 读取 HTTP 请求的协议头, 如果是 POST 方法, 还可能要读取客户端提交的数据，然后交给相应的 Handler（处理器）处理请求，Handler 处理完毕后装载好客户端需要的数据，最后通过 Client Socket 返回给客户端。
+
+就是对应代码：
+
+```go
+http.HandleFunc("/", sayHelloWorld)
+err := http.ListenAndServe(":9091", nil)
+```
+
+如果与基于 Nginx + PHP-FPM 驱动的 PHP Web 应用类比，这里的 HTTP 服务器对应 PHP-FPM。
+
+#### 创建 Listen Socket 监听端口
+
+调用的是 `net/http` 包的 `ListenAndServe` 方法，首先会初始化一个 `Server` 对象，然后调用该 `Server` 实例的 `ListenAndServe` 方法，进而调用 `net.Listen("tcp", addr)`，也就是基于 TCP 协议创建 Listen Socket，并在传入的IP 地址和端口号上监听请求，在本例中，IP 地址为空，默认是本机地址，端口号是 `9091`。【`net/http/server.go`】
+
+```go
+func (srv *Server) ListenAndServe() error {
+   if srv.shuttingDown() {
+      return ErrServerClosed
+   }
+   addr := srv.Addr
+   if addr == "" {
+      addr = ":http"
+   }
+   ln, err := net.Listen("tcp", addr)
+   if err != nil {
+      return err
+   }
+   return srv.Serve(ln)
+}
+```
+
+#### 接收客户端请求并建立连接
+
+创建 Listen Socket 成功后，调用 `Server` 实例的 `Serve(net.Listener)` 方法，用来接收并处理客户端的请求信息。这个方法里面起了一个 `for` 循环，在循环体中首先通过 `net.Listener`（即上一步监听端口中创建的 Listen Socket）实例的 `Accept` 方法接收客户端请求，接收到请求后根据请求信息创建一个 `conn` 连接实例，最后单独开了一个 goroutine，把这个请求的数据当做参数扔给这个 `conn` 去服务：【`net/http/server.go`】
+
+```go
+func (srv *Server) Serve(l net.Listener) error {
+   // ...
+  
+   for {
+      rw, err := l.Accept()
+      if err != nil {
+         if srv.shuttingDown() {
+            return ErrServerClosed
+         }
+         if ne, ok := err.(net.Error); ok && ne.Temporary() {
+            if tempDelay == 0 {
+               tempDelay = 5 * time.Millisecond
+            } else {
+               tempDelay *= 2
+            }
+            if max := 1 * time.Second; tempDelay > max {
+               tempDelay = max
+            }
+            srv.logf("http: Accept error: %v; retrying in %v", err, tempDelay)
+            time.Sleep(tempDelay)
+            continue
+         }
+         return err
+      }
+      connCtx := ctx
+      if cc := srv.ConnContext; cc != nil {
+         connCtx = cc(connCtx, rw)
+         if connCtx == nil {
+            panic("ConnContext returned nil")
+         }
+      }
+      tempDelay = 0
+      c := srv.newConn(rw)
+      c.setState(c.rwc, StateNew, runHooks) // before Serve can return
+      go c.serve(connCtx)
+   }
+}
+```
+
+这个就是高并发体现了，用户的每一次请求都是在一个新的 goroutine 去服务，相互不影响。客户端请求的具体处理逻辑都是在 `c.serve` 中完成的。
+
+#### 处理客户端请求并返回响应
+
+🔖
+
+
+
+### 2.2 Go语言路由映射和请求分发的底层实现及自定义路由器 🔖
+
+```go
+http.HandleFunc("/", sayHelloWorld)
+err := http.ListenAndServe(":9091", nil)
+```
+
+`http.ListenAndServe` 方法第二个参数传入的是 `nil`，表示底层会使用默认的 `DefaultServeMux` 实现将上述 `HandleFunc` 方法传入的处理函数转化为类似 Laravel 框架中基于闭包方式定义的路由：
+
+![ServeHTTP 方法源码](images/image-15766564475827.jpg)
+
+如果我们想要实现自定义的路由处理器，则需要构建一个自定义的、实现了 `Handler` 接口的类实例作为 `http.ListenAndServe` 的第二个参数传入。
+
+
+
+先来看看 `DefaultServeMux` 是如何保存路由映射规则以及分发请求做路由匹配的。
+
+#### DefaultServeMux底层实现
+
+`DefaultServeMux` 是 `ServeMux` 的默认实例：
+
+```go
+var DefaultServeMux = &defaultServeMux
+var defaultServeMux ServeMux
+```
+
+后缀 `Mux` 是 Multiplexer 的缩写，ServeMux 可以看作是 HTTP 请求的**多路复用器**，可以类比为 Laravel 框架中的路由器。
+
+它们要实现的功能是一致的：**接受HTTP请求，然后基于映射规则将其转发给正确的处理器进行处理**。
+
+![ServeMux 路由映射与请求分发原理](images/image-15772517390034.jpg)
+
+##### 路由映射规则保存
+
+ `ServeMux` 的数据结构：
+
+```go
+type ServeMux struct {
+    mu    sync.RWMutex. // 由于请求涉及到并发处理，因此这里需要一个锁机制
+    m     map[string]muxEntry // 路由规则字典，存放 URL 路径与处理器的映射关系
+    es    []muxEntry // MuxEntry 切片（按照最长到最短排序）
+    hosts bool       // 路由规则中是否包含 host 信息
+}
+```
+
+```go
+type muxEntry struct {
+    h   Handler       // 处理器具体实现
+    pattern string    // 模式匹配字符串
+}
+```
+
+```go
+type Handler interface {
+    ServeHTTP(ResponseWriter, *Request) // 路由处理实现方法
+}
+```
+
+当请求路径与 `pattern` 匹配时，就会调用 `Handler` 的 `ServeHTTP` 方法来处理请求。
+
+
+
+不过 `sayHelloWorld` 只是一个函数，并没有实现 `Handler` 接口，之所以可以成功添加到路由映射规则，是因为在底层通过 `HandlerFunc()` 函数将其强制转化为了 `HandlerFunc` 类型，而 `HandlerFunc` 类型实现了 `ServeHTTP` 方法，这样，`sayHelloWorld` 方法也就变相实现了 `Handler` 接口：
+
+```go
+func (mux *ServeMux) HandleFunc(pattern string, handler func(ResponseWriter, *Request)) {
+    if handler == nil {
+		  panic("http: nil handler")
+    }
+    mux.Handle(pattern, HandlerFunc(handler))
+}
+
+...
+
+type HandlerFunc func(ResponseWriter, *Request)
+
+func (f HandlerFunc) ServeHTTP(w ResponseWriter, r *Request) {
+    f(w, r)
+}
+```
+
+对于 `sayHelloWorld` 方法来说，它已然变成了 `HandlerFunc` 类型的函数类型，当我们在其实例上调用 `ServeHTTP` 方法时，调用的是 `sayHelloWorld` 方法本身。
+
+前面我们提到，`DefaultServeMux` 是 `ServeMux` 的默认实例，当我们在 `HandleFunc` 中调用 `mux.Handle` 方法时，实际上是将其路由映射规则保存到 `DefaultServeMux` 路由处理器的数据结构中：
+
+```go
+func (mux *ServeMux) Handle(pattern string, handler Handler) {
+	mux.mu.Lock()
+	defer mux.mu.Unlock()
+
+	if pattern == "" {
+		panic("http: invalid pattern")
+	}
+	if handler == nil {
+		panic("http: nil handler")
+	}
+	if _, exist := mux.m[pattern]; exist {
+		panic("http: multiple registrations for " + pattern)
+	}
+
+	if mux.m == nil {
+		mux.m = make(map[string]muxEntry)
+	}
+	e := muxEntry{h: handler, pattern: pattern}
+	mux.m[pattern] = e
+	if pattern[len(pattern)-1] == '/' {
+		mux.es = appendSorted(mux.es, e)
+	}
+
+	if pattern[0] != '/' {
+		mux.hosts = true
+	}
+}
+```
+
+##### 请求分发与路由匹配
+
+保存好路由映射规则之后，客户端请求又是怎么分发的呢？或者说请求 URL 与 `DefaultServeMux` 中保存的路由映射规则是如何匹配的呢？
+
+处理客户端请求时，会调用默认 `ServeMux` 实现的 `ServeHTTP` 方法：
+
+```go
+func (mux *ServeMux) ServeHTTP(w ResponseWriter, r *Request) {
+    if r.RequestURI == "*" {
+        w.Header().Set("Connection", "close")
+        w.WriteHeader(StatusBadRequest)
+        return
+    }
+    
+    h, _ := mux.Handler(r)
+    h.ServeHTTP(w, r)
+}
+```
+
+如上所示，路由处理器接收到请求之后，如果 URL 路径是 `*`，则关闭连接，否则调用 `mux.Handler(r)` 返回对应请求路径匹配的处理器，然后执行 `h.ServeHTTP(w, r)`，也就是调用对应路由 `handler` 的 `ServerHTTP` 方法，以 `/` 路由为例，调用的就是 `sayHelloWorld` 函数本身。
+
+
+
+#### 自定义路由处理器
+
+只需要定义一个实现了 `Handler` 接口的类，然后将其实例传递给 `http.ListenAndServe` 方法即可：
+
+```go
+package main
+
+import (
+   "fmt"
+   "net/http"
+)
+
+type MyHandler struct {
+}
+
+func (handler *MyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+   if r.URL.Path == "/" {
+      sayHelloGolang(w, r)
+      return
+   }
+   http.NotFound(w, r)
+   return
+}
+
+func sayHelloGolang(w http.ResponseWriter, r *http.Request) {
+   fmt.Fprintf(w, "Hello Golang!!")
+}
+
+func main() {
+   handler := MyHandler{}
+   http.ListenAndServe(":9091", &handler)
+}
+```
+
+`http://localhost:9091/`  
+
+这个实现很简单，而且我们并没有在应用启动期间初始化路由映射规则，而是在应用启动之后根据请求参数动态判断来做分发的，这样做会影响性能，而且非常不灵活，我们可以通过定义多个处理器的方式来解决这个问题：
+
+```go
+package main
+
+import (
+	"fmt"
+	"net/http"
+)
+
+type HelloHandler struct {
+}
+
+func (handler *HelloHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	sayHelloGolang2(w, r)
+}
+
+type WorldHandler struct {
+}
+
+func (handler *WorldHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprintf(w, "Hello World!")
+}
+
+func sayHelloGolang2(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprintf(w, "Hello Golang!!")
+}
+
+func main() {
+	hello := HelloHandler{}
+	world := WorldHandler{}
+	server := http.Server{
+		Addr: ":9091",
+	}
+	http.Handle("/hello", &hello)
+	http.Handle("/world", &world)
+	server.ListenAndServe()
+}
+```
+
+只是，我们又回到了老路子上，这里没有显式传入 handler，所以底层依然使用的是 `DefaultServeMux` 那套路由映射与请求分发机制，要实现完全自定义的、功能更加强大的处理器，只能通过自定义 ServeMux 来实现了，不过在这个领域，已经有非常好的第三方轮子可以直接拿来用了，比如 [gorilla/mux](https://github.com/gorilla/mux) 。
+
+### 2.3 基于gorilla/mux包实现路由定义和请求分发
+
+#### 1️⃣基本使用
+
+通过 `DefaultServeMux` 提供的路由处理器虽然简单易上手，但是存在很多不足，比如：
+
+- 不支持参数设定，例如 `/user/:uid` 这种泛类型匹配；
+- 对 REST 风格接口支持不友好，无法限制访问路由的方法；
+- 对于拥有很多路由规则的应用，编写大量路由规则非常繁琐。
+
+第三方库 `gorilla/mux` 提供的更加强大的路由处理器（`mux` 代表 `HTTP request multiplexer`，即 HTTP 请求多路复用器），和 `http.ServeMux` 实现原理一样，`gorilla/mux` 提供的路由器实现类 `mux.Router` 也会匹配用户请求与系统注册的路由规则，然后将用户请求转发过去。
+
+`mux.Router` 主要具备以下特性：
+
+- 实现了 `http.Handler` 接口，所以和 `http.ServeMux` 完全兼容；
+- 可以基于 URL 主机、路径、前缀、scheme、请求头、请求参数、请求方法进行路由匹配；
+- URL 主机、路径、查询字符串支持可选的正则匹配；
+- 支持构建或反转已注册的 URL 主机，以便维护对资源的引用；
+- 支持路由嵌套（类似 Laravel 中的路由分组），以便不同路由可以共享通用条件，比如主机、路径前缀等。
+
+```sh
+go get -u github.com/gorilla/mux
+```
+
+##### 使用入门
+
+##### 路由参数
+
+##### 自定义处理器
+
+```go
+package main
+
+import (
+	"fmt"
+	"github.com/gorilla/mux"
+	"log"
+	"net/http"
+)
+
+func sayHelloWorld(w http.ResponseWriter, r *http.Request) {
+	params := mux.Vars(r)
+	w.WriteHeader(http.StatusOK)                    // 设置响应状态码为 200
+	fmt.Fprintf(w, "Hello, %s!!!!", params["name"]) // 发送响应到客户端
+}
+
+// 自定义处理器
+type HelloWorldHandler struct {
+}
+
+func (handler *HelloWorldHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	params := mux.Vars(r)
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintf(w, "你好，%s!! 这是自定义处理器。", params["name"])
+}
+
+func main() {
+	r := mux.NewRouter()
+	r.HandleFunc("/hello", sayHelloWorld)
+	//r.HandleFunc("/hello/{name}", sayHelloWorld)
+	r.HandleFunc("/hello/{name:[a-z]+}", sayHelloWorld) // 用正则限制参数的字符
+	r.Handle("/hello/zh/{name}", &HelloWorldHandler{})
+	log.Fatal(http.ListenAndServe(":8080", r))
+}
+```
+
+
+
+
+
+#### 2️⃣进阶使用
+
+##### 限定请求方法
+
+
+
+```
+curl -X GET http://localhost:8080/hello/zh/golang
+```
+
+
+
+##### 路由前缀
+
+##### 域名匹配
+
+限定 Scheme
+
+##### 限定请求参数
+
+##### 自定义匹配规则
+
+##### 路由分组
+
+`gorilla/mux` 没有直接提供类似路由分组的术语。
+
+可以基于**子路由器（Subrouter）**来实现路由分组的功能，具体使用时，还可以借助前面介绍的路由前缀和域名匹配来对不同分组路由进行特性区分。
+
+
+
+```sh
+curl http://localhost:8080/posts/
+curl http://localhost:8080/posts/create -X POST
+...
+```
+
+
+
+##### 路由命名
+
+
+
+#### 3️⃣路由中间件 🔖
+
+![go-http-middleware](images/go-http-middleware.png)
+
+和 [Laravel 路由](https://laravelacademy.org/post/19925.html#toc-中间件)一样，Mux 也支持在路由中使用中间件，并且按照顺序匹配执行。
+
+和 Laravel 一样，在 Go Web 编程中，中间件的典型使用场景包括认证、日志、请求头操作和 `ResponseWriter` “劫持”等。
+
+
+
+
+
+#### 4️⃣处理静态资源响应
+
+要处理静态资源，需要借助 `PathPrefix()` 方法指定静态资源所在的路径前缀，然后在请求处理器中直接通过 `http.FileServer` 返回文件本身作为响应:
+
+```go
+func main()  {
+    r := mux.NewRouter()
+    r.Use(loggingMiddleware)
+
+    // 解析服务器启动参数 dir 作为静态资源 Web 根目录
+    // 默认是当前目录 .
+    var dir string
+    flag.StringVar(&dir, "dir", ".", "静态资源所在目录，默认为当前目录")
+    flag.Parse()
+
+    // 处理形如 http://localhost:8000/static/<filename> 的静态资源路由
+    r.PathPrefix("/static/").Handler(http.StripPrefix("/static/", http.FileServer(http.Dir(dir))))    
+    
+    // 其它路由
+    ...
+    
+    log.Fatal(http.ListenAndServe(":8080", r))
+}
+```
+
+```sh
+go run muxDemo.go -dir=static
+```
+
+通过 `dir` 参数指定了静态资源的目录为 `static`。
+
+http://localhost:8080/static/app.js
+
+
+
+
+
+### 2.4 基于gorilla/mux实现路由匹配和请求分发 🔖
+
+#### 服务单页面应用
+
+随着前后端分离的大势所趋，后端应用为前端单页面应用（SPA，通常由 Vue、React 等前端框架构建）提供包含数据的 API 接口，然后由前端代码负责路由跳转和渲染变得越来越流行，`gorilla/mux` 包也对此功能特性提供了开箱支持。
+
+
+
+#### 基于 CORS 处理跨域请求
+
+
+
+#### 健康检查与接口测试
+
+
+
+### 2.5 仿照 Laravel 框架对 Go 路由处理器代码进行拆分
+
+
+
+
+
+## 3 请求处理
+
+### 3.1 通过 Request 对象读取 HTTP 请求报文
+
+
+
+### 获取HTTP请求数据（上）：查询字符串、表单请求和 JSON 请求
+
+
+
+### 获取HTTP请求数据（下）：文件上传处理
+
+
+
+### 通过 ResponseWriter 对象发送 HTTP 响应
+
+
+
+### 设置、读取和删除 HTTP Cookie
+
+
+
+### 基于gorilla/sessions包在启动和管理Session
+
+
+
+
+
+
+
+## 4 视图模板
+
+### 模板引擎的定义、解析与执行
+
+
+
+### 通过指令实现控制结构和模板引入
+
+
+
+### 参数、管道和函数调用
+
+
+
+### 上下文感知与XSS攻击
+
+
+
+### 模板布局和继承
+
+
+
+
+
+## 5 数据存储
+
+### 5.1 基于内存存储实现数据增删改查功能
+
+
+
+### 5.2 文件存储
+
+#### 通过 JSON 格式序列化文本数据
+
+
+
+#### 通过 CSV 格式读写文本数据
+
+
+
+#### 通过 Gob 包序列化二进制数据
+
+
+
+
+
+
+
+## 6 数据库操作
+
+
+
+### 数据库连接建立和增删改查基本实现
+
+
+
+### 数据表之间关联关系和关联查询
+
+
+
+### GORM 使用入门
+
+
+
+## 7 安全技术
+
+### Go视图模板篇（四）：上下文感知与XSS攻击
+
+
+
+### 在Go语言中基于中间件避免CSRF攻击
+
+
+
+
+
+
+
+
+
+
+
+
+
+---
 
 
 
