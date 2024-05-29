@@ -1,6 +1,14 @@
 # Go入门教程
 
-[Go入门教程](https://laravelacademy.org/books/golang-tutorials)
+
+
+> 学习go资源:
+>
+> [Go入门教程](https://laravelacademy.org/books/golang-tutorials)
+>
+> [Go语言中文文档 (topgoer.com)](https://www.topgoer.com/)
+
+
 
 
 
@@ -2965,9 +2973,9 @@ if err != nil {
 
 ### 7.2 defer 语句及其使用
 
-Go 语言中的类没有构造函数和析构函数的概念，处理错误和异常时也没有提供 `try...catch...finally` 之类的语法，那当我们想要在某个资源使用完毕后将其释放（网络连接、文件句柄等），或者在代码运行过程中抛出错误时执行一段兜底逻辑，要怎么做呢？
+Go语言中的类没有构造函数和析构函数的概念，处理错误和异常时也没有提供 `try...catch...finally` 之类的语法，那当我们想要在某个资源使用完毕后将其释放（网络连接、文件句柄等），或者在代码运行过程中抛出错误时执行一段兜底逻辑，要怎么做呢？
 
-通过 `defer` 关键字声明兜底执行或者释放资源的语句可以轻松解决这个问题。
+通过`defer`关键字声明==兜底执行==或者==释放资源==的语句可以轻松解决这个问题。
 
 Go 内置的 [io/ioutil](https://golang.google.cn/pkg/io/ioutil/) 包提供的读取文件方法 `ReadFile` 实现源码，其中就有 `defer` 语句的使用：
 
@@ -3744,6 +3752,56 @@ func LookupHost(name string) (cname string, addrs []string, err error)
 
 
 ## 10 数据结构和算法篇
+
+
+
+## 11 常用标准库🔖🔖
+
+### [fmt](https://www.topgoer.com/常用标准库/fmt.html)
+
+#### [Time](https://www.topgoer.com/常用标准库/time.html)
+
+#### [Flag](https://www.topgoer.com/常用标准库/flag.html)
+
+#### [Log](https://www.topgoer.com/常用标准库/log.html)
+
+#### [IO操作](https://www.topgoer.com/常用标准库/文件操作.html)
+
+`os/file.go`
+
+终端其实是一个文件，相关实例如下：
+
+- `os.Stdin`：标准输入的文件实例，类型为`*File`
+- `os.Stdout`：标准输出的文件实例，类型为`*File`
+- `os.Stderr`：标准错误输出的文件实例，类型为`*File`
+
+
+
+#### [Strconv](https://www.topgoer.com/常用标准库/strconv.html)
+
+
+
+#### [Template](https://www.topgoer.com/常用标准库/template.html)
+
+
+
+#### [Http](https://www.topgoer.com/常用标准库/http.html)
+
+
+
+#### [Context](https://www.topgoer.com/常用标准库/Context.html)
+
+
+
+#### [数据格式](https://www.topgoer.com/常用标准库/数据格式.html)
+
+
+
+#### [反射](https://www.topgoer.com/常用标准库/反射.html)
+
+
+
+
 
 
 
