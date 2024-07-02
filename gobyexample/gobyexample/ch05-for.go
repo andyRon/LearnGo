@@ -13,7 +13,8 @@ func main() {
 		fmt.Println(j)
 	}
 
-	for i := range 3 {
+	nums := []int{1, 2, 3}
+	for i := range nums {
 		fmt.Println("range", i)
 	}
 	// 不带条件的 `for` 循环将一直重复执行，直到在循环体内使用 break 或 return

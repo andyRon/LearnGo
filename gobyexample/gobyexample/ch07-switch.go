@@ -48,3 +48,12 @@ func main() {
 	whatAmI(1)
 	whatAmI("hey")
 }
+
+/*
+two
+工作日
+before
+bool
+int
+Don't konw type string
+*/
