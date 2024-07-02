@@ -33,6 +33,8 @@ Go已经成为了云基础架构语言，它在**云原生基础设施、中间�
 
 
 
+# 前置篇：心定之旅
+
 ## 01 前世今生：Go的历史和现状
 
 了解一门编程语言的历史和现状，以及未来的走向，可以建立起**学习的“安全感”**，相信它能够给你带来足够的价值和收益，更加坚定地学习下去
@@ -216,6 +218,10 @@ Go在标准库中提供了官方的**词法分析器、语法解析器和类型�
 ### 思考题
 
 > 还能举出哪些符合Go语言设计哲学的例子吗？
+
+
+
+# 入门篇：勤加练手
 
 ## 03 配好环境：选择一种最适合你的Go安装方法
 
@@ -549,7 +555,377 @@ go mod tidy会自动分析源码依赖，而且将不再使用的依赖从go.mod
 
 
 
+## 08 入口函数与包初始化：搞清Go程序的执行次序
 
+### main.main函数：Go应用的入口函数
+
+Go语言要求：**可执行程序的main包必须定义main函数，否则Go编译器会报错**。在启动了多个Goroutine的Go应用中，main.main函数将在Go应用的主Goroutine中执行。
+
+不过很有意思的是，在多Goroutine的Go应用中，相较于main.main作为Go应用的入口，**main.main函数返回的意义其实更大**，因为main函数返回就意味着整个Go程序的终结，而且你也不用管这个时候是否还有其他子Goroutine正在执行。
+
+
+
+除了main包外，其他包也可以拥有自己的名为main的函数或方法。但按照Go的可见性规则（小写字母开头的标识符为非导出标识符），非main包中自定义的main函数仅限于包内使用。
+
+> 对于main包的main函数来说，虽然是用户层逻辑的入口函数，但它却**不一定是用户层第一个被执行的函数**。
+
+### init函数：Go包的初始化函数
+
+如果main包依赖的包中定义了init函数，或者是main包自身定义了init函数，那么Go程序在这个包初始化的时候，就会自动调用它的init函数，因此这些init函数的执行就都会发生在main函数之前。
+
+
+
+### Go包的初始化次序
+
+从程序逻辑结构角度来看，Go包是程序逻辑封装的基本单元，每个包都可以理解为是一个“自治”的、封装良好的、对外部暴露有限接口的基本单元。一个Go程序就是由一组包组成的，程序的初始化就是这些包的初始化。每个Go包还会有自己的依赖包、常量、变量、init函数（其中main包有main函数）等。
+
+> 注意📢：我们在阅读和理解代码的时候，需要知道这些元素在在程序初始化过程中的初始化顺序，这样便于我们确定在某一行代码处这些元素的当前状态。
+
+Go包的初始化次序：
+
+![](images/image-20240702182932741.png)
+
+1. 首先，main包依赖pkg1和pkg4两个包，所以第一步，Go会根据包导入的顺序，先去初始化main包的第一个依赖包pkg1。
+2. 第二步，Go在进行包初始化的过程中，会采用“==深度优先==”的原则，递归初始化各个包的依赖包。在上图里，pkg1包依赖pkg2包，pkg2包依赖pkg3包，pkg3没有依赖包，于是Go在pkg3包中按照“==常量 -> 变量 -> init函数==”的顺序先对pkg3包进行初始化；
+3. 紧接着，在pkg3包初始化完毕后，Go会回到pkg2包并对pkg2包进行初始化，接下来再回到pkg1包并对pkg1包进行初始化。在调用完pkg1包的init函数后，Go就完成了main包的第一个依赖包pkg1的初始化。
+4. 接下来，Go会初始化main包的第二个依赖包pkg4，pkg4包的初始化过程与pkg1包类似，也是先初始化它的依赖包pkg5，然后再初始化自身；然后，当Go初始化完pkg4包后也就完成了对main包所有依赖包的初始化，接下来初始化main包自身。
+5. 最后，在main包中，Go同样会按照“常量 -> 变量 -> init函数”的顺序进行初始化，执行完这些初始化工作后才正式进入程序的入口函数main函数。
+
+
+
+🔖  包引入错误？变量和常量的执行顺序为什么反了？
+
+
+
+Go包的初始化次序，三点：
+
+- 依赖包按“深度优先”的次序进行初始化；
+- 每个包内按以“常量 -> 变量 -> init函数”的顺序进行初始化；
+- 包内的多个init函数按出现次序进行自动调用。
+
+
+
+### init函数的用途
+
+Go包初始化时，init函数的初始化次序在变量之后，这给了开发人员在init函数中**对包级变量进行进一步检查与操作**的机会。
+
+#### 用途1：重置包级变量值
+
+负责对包内部以及暴露到外部的包级数据（主要是包级变量）的初始状态进行检查。
+
+例如，标准库flag包：🔖
+
+flag包定义了一个导出的包级变量CommandLine，如果用户没有通过flag.NewFlagSet创建新的代表命令行标志集合的实例，那么CommandLine就会作为flag包各种导出函数背后，默认的代表命令行标志集合的实例。
+
+```go
+var CommandLine = NewFlagSet(os.Args[0], ExitOnError)
+
+func NewFlagSet(name string, errorHandling ErrorHandling) *FlagSet {
+    f := &FlagSet{
+        name:          name,
+        errorHandling: errorHandling,
+    }
+    f.Usage = f.defaultUsage
+    return f
+}
+
+func (f *FlagSet) defaultUsage() {
+    if f.name == "" {
+        fmt.Fprintf(f.Output(), "Usage:\n")
+    } else {
+        fmt.Fprintf(f.Output(), "Usage of %s:\n", f.name)
+    }
+    f.PrintDefaults()
+}
+```
+
+在通过NewFlagSet创建CommandLine变量绑定的FlagSet类型实例时，CommandLine的Usage字段被赋值为defaultUsage。也就是说，如果保持现状，那么使用flag包默认CommandLine的用户就无法自定义usage的输出了。于是，flag包在init函数中重置了CommandLine的Usage字段：
+
+```go
+func init() {
+    CommandLine.Usage = commandLineUsage // 重置CommandLine的Usage字段
+}
+
+func commandLineUsage() {
+    Usage()
+}
+
+var Usage = func() {
+    fmt.Fprintf(CommandLine.Output(), "Usage of %s:\n", os.Args[0])
+    PrintDefaults()
+}
+```
+
+这个时候我们会发现，CommandLine的Usage字段，设置为了一个flag包内的未导出函数commandLineUsage，后者则直接使用了flag包的另外一个导出包变量Usage。这样，就可以通过init函数，将CommandLine与包变量Usage关联在一起了。
+
+然后，当用户将自定义的usage赋值给了flag.Usage后，就相当于改变了默认代表命令行标志集合的CommandLine变量的Usage。这样当flag包完成初始化后，CommandLine变量便处于一个合理可用的状态了。
+
+#### 用途2：实现对包级变量的复杂初始化
+
+些包级变量需要一个比较复杂的初始化过程，有些时候，使用它的**类型零值**（每个Go类型都具有一个零值定义）或通过简单初始化表达式不能满足业务逻辑要求，而init函数则非常适合完成此项工作，标准库http包中就有这样一个典型示例：
+
+```go
+// net/http/h2_bundle.go
+var (
+    http2VerboseLogs    bool // 初始化时默认值为false
+    http2logFrameWrites bool // 初始化时默认值为false
+    http2logFrameReads  bool // 初始化时默认值为false
+    http2inTests        bool // 初始化时默认值为false
+)
+
+func init() {
+    e := os.Getenv("GODEBUG")
+    if strings.Contains(e, "http2debug=1") {
+        http2VerboseLogs = true // 在init中对http2VerboseLogs的值进行重置
+    }
+    if strings.Contains(e, "http2debug=2") {
+        http2VerboseLogs = true // 在init中对http2VerboseLogs的值进行重置
+        http2logFrameWrites = true // 在init中对http2logFrameWrites的值进行重置
+        http2logFrameReads = true // 在init中对http2logFrameReads的值进行重置
+    }
+}
+```
+
+http包定义了一系列布尔类型的特性开关变量，可以通过GODEBUG环境变量的值，开启相关特性开关。
+
+#### 用途3：在init函数中实现“注册模式”
+
+lib/pq包访问PostgreSQL数据库的代码示例：
+
+```go
+import (
+    "database/sql"
+    _ "github.com/lib/pq"
+)
+
+func main() {
+    db, err := sql.Open("postgres", "user=pqgotest dbname=pqgotest sslmode=verify-full")
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    age := 21
+    rows, err := db.Query("SELECT name FROM users WHERE age = $1", age)
+    ...
+}
+```
+
+以空导入的方式导入[lib/pq](https://github.com/lib/pq)包的，main函数中没有使用pq包的任何变量、函数或方法，这样就实现了对PostgreSQL数据库的访问。而这一切的奥秘，全在pq包的init函数中：
+
+```go
+func init() {
+    sql.Register("postgres", &Driver{})
+}
+```
+
+利用了用空导入的方式导入lib/pq包时产生的一个“副作用”，也就是lib/pq包作为main包的依赖包，它的init函数会在pq包初始化的时候得以执行。
+
+init函数中，pq包将自己实现的sql驱动注册到了sql包中。这样只要应用层代码在Open数据库的时候，传入驱动的名字（这里是“postgres”)，那么通过sql.Open函数，返回的数据库实例句柄对数据库进行的操作，实际上调用的都是pq包中相应的驱动实现。
+
+实际上，这种**通过在init函数中注册自己的实现的模式，就有效降低了Go包对外的直接暴露，尤其是包级变量的暴露**，从而避免了外部通过包级变量对包状态的改动。
+
+另外，从标准库database/sql包的角度来看，这种“注册模式”实质是一种**工厂设计模式**的实现，sql.Open函数就是这个模式中的工厂方法，它根据外部传入的驱动名称“生产”出不同类别的数据库实例句柄。
+
+这种“注册模式”在标准库的其他包中也有广泛应用，比如说，使用标准库image包获取各种格式图片的宽和高：
+
+```go
+package main
+
+import (
+    "fmt"
+    "image"
+    _ "image/gif" // 以空导入方式注入gif图片格式驱动
+    _ "image/jpeg" // 以空导入方式注入jpeg图片格式驱动
+    _ "image/png" // 以空导入方式注入png图片格式驱动
+    "os"
+)
+
+func main() {
+    // 支持png, jpeg, gif
+    width, height, err := imageSize(os.Args[1]) // 获取传入的图片文件的宽与高
+    if err != nil {
+        fmt.Println("get image size error:", err)
+        return
+    }
+    fmt.Printf("image size: [%d, %d]\n", width, height)
+}
+
+func imageSize(imageFile string) (int, int, error) {
+    f, _ := os.Open(imageFile) // 打开图文文件
+    defer f.Close()
+
+    img, _, err := image.Decode(f) // 对文件进行解码，得到图片实例
+    if err != nil {
+        return 0, 0, err
+    }
+
+    b := img.Bounds() // 返回图片区域
+    return b.Max.X, b.Max.Y, nil
+}
+```
+
+上面这个示例程序支持png、jpeg、gif三种格式的图片，而达成这一目标的原因，正是image/png、image/jpeg和image/gif包都在各自的init函数中，将自己“注册”到image的支持格式列表中了：
+
+```go
+// $GOROOT/src/image/png/reader.go
+func init() {
+    image.RegisterFormat("png", pngHeader, Decode, DecodeConfig)
+}
+
+// $GOROOT/src/image/jpeg/reader.go
+func init() {
+    image.RegisterFormat("jpeg", "\xff\xd8", Decode, DecodeConfig)
+}
+
+// $GOROOT/src/image/gif/reader.go
+func init() {
+    image.RegisterFormat("gif", "GIF8?a", Decode, DecodeConfig)
+}  
+```
+
+
+
+### 思考题
+
+> 当init函数在检查包数据初始状态时遇到失败或错误的情况，我们该如何处理呢？
+
+## 09 即学即练：构建一个Web服务就是这么简单
+
+
+
+
+
+
+
+# 基础篇：“脑勤”多理解
+
+## 10 变量声明：静态语言有别于动态语言的重要特征
+
+
+
+## 11 代码块与作用域：如何保证变量不会被遮蔽？
+
+
+
+## 12 基本数据类型：Go原生支持的数值类型有哪些？
+
+
+
+## 13 基本数据类型：为什么Go要原生支持字符串类型？
+
+
+
+## 14 常量：Go在“常量”设计上的创新有哪些？
+
+
+
+## 15 同构复合类型：从定长数组到变长切片
+
+
+
+## 16 复合数据类型：原生map类型的实现机制是怎样的？
+
+
+
+
+
+## 17 复合数据类型：用结构体建立对真实世界的抽象
+
+
+
+## 18 控制结构：if的“快乐路径”原则
+
+
+
+
+
+## 19 控制结构：Go的for循环，仅此一种
+
+
+
+
+
+## 20 控制结构：Go中的switch语句有哪些变化？
+
+
+
+## 21 函数：请叫我“一等公民”
+
+
+
+
+
+## 22 函数：怎么结合多返回值进行错误处理？
+
+ 
+
+
+
+## 23 函数：怎么让函数更简洁健壮？
+
+
+
+
+
+## 24 方法：理解“方法”的本质
+
+
+
+## 25 方法：方法集合与如何选择receiver类型？
+
+
+
+## 26 方法：如何用类型嵌入模拟实现“继承”？
+
+
+
+## 27 即学即练：跟踪函数调用链，理解代码更直观
+
+
+
+# 核心篇：“脑勤+”洞彻核心
+
+## 28｜接口：接口即契约
+
+
+
+
+
+## 29 接口：为什么nil接口不等于nil？
+
+
+
+
+
+## 30 接口：Go中最强大的魔法
+
+
+
+## 31 并发：Go的并发方案实现方案是怎样的？
+
+
+
+## 32 并发：聊聊Goroutine调度器的原理
+
+
+
+## 33 并发：小channel中蕴含大智慧
+
+
+
+## 34 并发：如何使用共享变量？
+
+
+
+## 35 即学即练：如何实现一个轻量级线程池？
+
+
+
+# 实战篇：打通“最后一公里”
+
+
+
+# 泛型篇
 
 
 
