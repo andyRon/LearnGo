@@ -292,7 +292,7 @@ go 1.22.1
 
 一个module就是一个包的集合，这些包和module一起打版本、发布和分发。go.mod所在的目录被称为它声明的module的根目录。
 
-第一行内容是用于声明==module路径（module path）==的。而且，module隐含了一个==命名空间==的概念，module下每个包的导入路径都是由**module path和包所在子目录的名字**结合在一起构成。比如，如果hellomodule下有子目录pkg/pkg1，那么pkg1下面的包的导入路径就是由module path（`github.com/andyron/hellomodule`）和包所在子目录的名字（pkg/pkg1）结合而成，也就是`github.com/andyron/hellomodule/pkg/pkg1`。
+第一行内容是用于声明==module路径（module path）==的。而且，module隐含了一个==命名空间==的概念，module下每个包的导入路径都是由**==module path==和==包所在子目录的名字==**结合在一起构成。比如，如果hellomodule下有子目录pkg/pkg1，那么pkg1下面的包的导入路径就是由module path（`github.com/andyron/hellomodule`）和包所在子目录的名字（pkg/pkg1）结合而成，也就是`github.com/andyron/hellomodule/pkg/pkg1`。
 
 `go 1.22.1`是一个Go版本指示符，用于表示这个module是在某个特定的Go版本的module语义的基础上编写的。
 
@@ -303,3 +303,253 @@ go 1.22.1
 > - **更新依赖的版本**
 
 `go.sum`文件记录了hellomodule的**直接依赖和间接依赖包的相关版本的hash值，用来校验本地包的真实性**。在构建的时候，如果本地依赖包的hash值与go.sum文件中记录的不一致，就会被拒绝构建。
+
+
+
+## 05 标准先行：Go项目的布局标准是什么？
+
+### Go语言“创世项目”结构是怎样的？
+
+“Go语言的创世项目”就是Go语言项目自身。
+
+
+
+
+
+### 现在的Go项目的典型结构布局是怎样的？
+
+#### 1️⃣可执行程序项目
+
+典型五个部分：
+
+- 放在项目顶层的Go Module相关文件，包括go.mod和go.sum；
+- cmd目录：存放项目要编译构建的可执行文件所对应的main包的源码文件；
+- 项目包目录：每个项目下的非main包都“平铺”在项目的根目录下，每个目录对应一个Go包；
+- internal目录：存放仅项目内部引用的Go包，这些包无法被项目之外引用；
+- vendor目录：这是一个可选目录，为了兼容Go 1.5引入的vendor构建模式而存在的。这个目录下的内容均由Go命令自动维护，不需要开发者手工干预。
+
+
+
+#### 2️⃣库项目
+
+去掉cmd目录和vendor目录。
+
+
+
+## 06 构建模式：Go是怎么解决包依赖管理问题的？
+
+### Go构建模式是怎么演化的？
+
+Go程序由Go包组合而成的，Go程序的==构建过程==就是**确定包版本、编译包以及将编译后得到的目标文件链接在一起**的过程。
+
+Go语言的构建模式历经了三个迭代和演化过程：
+
+### 1️⃣最初期的GOPATH
+
+
+
+### 2️⃣1.5版本的Vendor机制
+
+vendor机制本质上就是在Go项目的某个特定目录下，将项目的所有依赖包缓存起来，这个特定目录名就是vendor。
+
+
+
+### 3️⃣现在的Go Module
+
+一个Go Module是一个Go包的集合。module是有版本的，所以module下的包也就有了版本属性。这个module与这些包会组成一个独立的版本单元，它们一起打版本、发布和分发。
+
+在Go Module模式下，通常一个代码仓库对应一个Go Module。一个Go Module的顶层目录下会放置一个go.mod文件，每个go.mod文件会定义唯一一个module，也就是说Go Module与go.mod是一一对应的。
+
+go.mod文件所在的顶层目录也被称为**module的根目录**，module根目录以及它子目录下的所有Go包均归属于这个Go Module，这个module也被称为**main module**。
+
+### 创建一个Go Module
+
+步骤：
+
+1. 第一步，通过go mod init创建go.mod文件，将当前项目变为一个Go Module；
+2. 第二步，通过go mod tidy命令自动更新当前module的依赖信息；
+3. 第三步，执行go build，执行新module的构建。
+
+
+
+由`go mod tidy`下载的依赖module会被放置在本地的module缓存路径下，默认值为`$GOPATH[0]/pkg/mod`，Go 1.15及以后版本可以通过`GOMODCACHE`环境变量，自定义本地module的缓存路径。
+
+> 推荐把go.mod和go.sum两个文件与源码，一并提交到代码版本控制服务器上。
+
+go build命令会读取go.mod中的依赖及版本信息，并在本地module缓存路径下找到对应版本的依赖module，执行编译和链接。
+
+
+
+项目所依赖的包有很多版本，Go Module是如何选出最适合的那个版本的呢？
+
+### 深入Go Module构建模式
+
+#### 语义导入版本(Semantic Import Versioning)
+
+版本号，都符合`vX.Y.Z`的格式，由==前缀v==和一个==满足语义版本规范的版本号==组成。语义版本号分成3部分：主版本号(major)、次版本号(minor)和补丁版本号(patch)。
+
+![](images/image-20240702171216789.png)
+
+借助于语义版本规范，Go命令可以确定同一module的两个版本发布的先后次序，而且可以确定它们是否兼容。
+
+按照语义版本规范，**主版本号不同的两个版本是相互不兼容的**。而且，在主版本号相同的情况下，**次版本号大都是向后兼容次版本号小的版本。补丁版本号也不影响兼容性**。
+
+而且，Go Module规定：**如果同一个包的新旧版本是兼容的，那么它们的包导入路径应该是相同的**。以logrus为例，选出两个版本v1.7.0和v1.8.1.。按照上面的语义版本规则，这两个版本的主版本号相同，新版本v1.8.1是兼容老版本v1.7.0的。那么，我们就可以知道，如果一个项目依赖logrus，无论它使用的是v1.7.0版本还是v1.8.1版本，它都可以使用下面的包导入语句导入logrus包：
+
+```go
+import "github.com/sirupsen/logrus"
+```
+
+> 新问题：
+>
+> 假如在未来的某一天，logrus的作者发布了logrus v2.0.0版本。那么根据语义版本规则，该版本的主版本号为2，已经与v1.7.0、v1.8.1的主版本号不同了，那么v2.0.0与v1.7.0、v1.8.1就是不兼容的包版本。然后我们再按照Go Module的规定，如果一个项目依赖logrus v2.0.0版本，那么它的包导入路径就不能再与上面的导入方式相同了。那我们应该使用什么方式导入logrus v2.0.0版本呢？
+
+Go Module创新性地给出了一个方法：**将包主版本号引入到包导入路径中**：
+
+```go
+import "github.com/sirupsen/logrus/v2"
+```
+
+甚至可以同时依赖一个包的两个不兼容版本：
+
+```go
+import (
+  "github.com/sirupsen/logrus"
+  logv2 "github.com/sirupsen/logrus/v2"
+)
+```
+
+
+
+> v0.y.z版本应该使用哪种导入路径呢？
+>
+> v0.y.z这样的版本号是用于项目初始开发阶段的版本号。在这个阶段任何事情都有可能发生，其API也不应该被认为是稳定的。Go Module将这样的版本(v0)与主版本号v1做同等对待，也就是采用不带主版本号的包导入路径，这样一定程度降低了Go开发人员使用这样版本号包时的心智负担。
+
+#### 最小版本选择(Minimal Version Selection)
+
+![](images/image-20240702171932253.png)
+
+> myproject有两个直接依赖A和B，A和B有一个共同的依赖包C，但A依赖C的v1.1.0版本，而B依赖的是C的v1.3.0版本，并且此时C包的最新发布版为C v1.7.0。这个时候，Go命令是如何为myproject选出间接依赖包C的版本呢？选出的究竟是v1.7.0、v1.1.0还是v1.3.0呢？
+
+当前存在的主流编程语言，以及Go Module出现之前的很多Go包依赖管理工具都会选择依赖项的“**最新最大(Latest Greatest)版本**”，也就是v1.7.0。
+
+Go设计者另辟蹊径，在诸多兼容性版本间，他们不光要考虑最新最大的稳定与安全，还要尊重各个module的述求：A明明说只要求C v1.1.0，B明明说只要求C v1.3.0。所以Go会在该项目依赖项的所有版本中，选出符合项目整体要求的“最小版本”。
+
+这个例子中，C v1.3.0是符合项目整体要求的版本集合中的版本最小的那个，于是Go命令选择了C v1.3.0，而不是最新最大的C v1.7.0。Go团队认为**“最小版本选择”为Go程序实现持久的和可重现的构建提供了最佳的方案**。
+
+
+
+### Go各版本构建模式机制和切换
+
+![](images/image-20240702172417325.png)
+
+
+
+## 07 构建模式：GoModule的6类常规操作
+
+### 为当前module添加一个依赖
+
+```go
+package main
+
+import "github.com/sirupsen/logrus"
+import "github.com/google/uuid"
+
+func main() {
+	logrus.Println("hello, go module mode.")
+	logrus.Println(uuid.NewString())
+}
+```
+
+可以`go get github.com/google/uuid`，也可以使用`go mod tidy`命令，在执行构建前自动分析源码中的依赖变化，识别新增依赖项并下载它们。
+
+### 升级/降级依赖的版本
+
+```sh
+$ go list -m -versions github.com/sirupsen/logrus
+github.com/sirupsen/logrus v0.1.0 v0.1.1 v0.2.0 v0.3.0 v0.4.0 v0.4.1 v0.5.0 v0.5.1 v0.6.0 v0.6.1 v0.6.2 v0.6.3 v0.6.4 v0.6.5 v0.6.6 v0.7.0 v0.7.1 v0.7.2 v0.7.3 v0.8.0 v0.8.1 v0.8.2 v0.8.3 v0.8.4 v0.8.5 v0.8.6 v0.8.7 v0.9.0 v0.10.0 v0.11.0 v0.11.1 v0.11.2 v0.11.3 v0.11.4 v0.11.5 v1.0.0 v1.0.1 v1.0.3 v1.0.4 v1.0.5 v1.0.6 v1.1.0 v1.1.1 v1.2.0 v1.3.0 v1.4.0 v1.4.1 v1.4.2 v1.5.0 v1.6.0 v1.7.0 v1.7.1 v1.8.0 v1.8.1 v1.8.2 v1.8.3 v1.9.0 v1.9.1 v1.9.2 v1.9.3
+```
+
+降级：
+
+```sh
+$ go get github.com/google/uuid@v1.7.0
+```
+
+或
+
+```sh
+$ go mod edit -require=github.com/sirupsen/logrus@v1.7.0
+$ go mod tidy       
+go: downloading github.com/sirupsen/logrus v1.7.0
+```
+
+
+
+升级：
+
+```sh
+$ go get github.com/google/uuid@v1.7.1
+```
+
+
+
+在Go Module构建模式下，当依赖的主版本号为0或1的时候，我们在Go源码中导入依赖包，不需要在包的导入路径上增加版本号，也就是：
+
+```go
+import github.com/user/repo/v0 等价于 import github.com/user/repo
+import github.com/user/repo/v1 等价于 import github.com/user/repo
+```
+
+
+
+### 添加一个主版本号大于1的依赖
+
+语义导入版本机制有一个原则：**如果新旧版本的包使用相同的导入路径，那么新包与旧包是兼容的**。也就是说，如果新旧两个包不兼容，那么我们就应该采用不同的导入路径。
+
+```go
+import github.com/user/repo/v2/xxx
+```
+
+主版本号大于1的依赖，**在声明它的导入路径的基础上，加上版本号信息**。
+
+
+
+### 升级依赖版本到一个不兼容版本
+
+
+
+
+
+### 移除一个依赖
+
+列出当前module的所有依赖：
+
+```sh
+$ go list -m all
+```
+
+
+
+删除代码中对包依赖，然后`go build`是不会从当前module中移除相关依赖的，需要使用`go mod tidy`命令。
+
+go mod tidy会自动分析源码依赖，而且将不再使用的依赖从go.mod和go.sum中移除。
+
+
+
+### 特殊情况：使用vendor🔖
+
+
+
+
+
+### 思考题
+
+> 如果你是一个公共Go包的作者，在发布你的Go包时，有哪些需要注意的地方？
+
+
+
+
+
+
+
