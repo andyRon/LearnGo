@@ -791,7 +791,266 @@ func init() {
 
 ## 09 即学即练：构建一个Web服务就是这么简单
 
+### 最简单的HTTP服务
 
+```go
+package main
+
+import "net/http"
+
+func main() {
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("hello, world!"))
+	})
+	http.ListenAndServe(":8080", nil)
+}
+```
+
+ListenAndServe
+
+HandleFunc
+
+第二个参数r代表来自客户端的HTTP请求，第一个参数w则是用来操作返回给客户端的应答的，基于http包实现的HTTP服务的处理函数都要符合这一原型。
+
+将请求中的URI路径与设置的模式字符串进行==最长前缀匹配==，并执行匹配到的模式字符串所对应的处理函数。
+
+### 图书管理API服务 ❤️
+
+![](images/image-20240703103915037.png)
+
+#### 项目建立与布局设计
+
+bookstore
+
+服务大体拆分为两大部分：
+
+- 一部分是HTTP服务器，用来对外提供API服务；
+- 另一部分是图书数据的存储模块，所有的图书数据均存储在这里。
+
+Go项目布局标准：
+
+```
+├── cmd/
+│   └── bookstore/         // 放置bookstore main包源码
+│       └── main.go
+├── go.mod                 // module bookstore的go.mod
+├── go.sum
+├── internal/              // 存放项目内部包的目录
+│   └── store/
+│       └── memstore.go     
+├── server/                // HTTP服务器模块
+│   ├── middleware/
+│   │   └── middleware.go
+│   └── server.go          
+└── store/                 // 图书数据存储模块
+    ├── factory/
+    │   └── factory.go
+    └── store.go
+```
+
+#### 项目main包
+
+![](images/image-20240703104236493.png)
+
+```go
+// cmd/bookstore/main.go
+package main
+
+import (
+	_ "bookstore/internal/store"
+	"bookstore/server"
+	"bookstore/store/factory"
+	"context"
+	"log"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+)
+
+func main() {
+	s, err := factory.New("mem") // 1️⃣创建图书数据存储模块实例
+	if err != nil {
+		panic(err)
+	}
+
+	srv := server.NewBookStoreServer(":8080", s) // 2️⃣创建http服务实例
+
+	errChan, err := srv.ListenAndServe() // 运行http服务
+	if err != nil {
+		log.Println("web server start failed: ", err)
+		return
+	}
+	log.Println("web server start ok")
+
+	// 3️⃣通过监视系统信号实现了http服务实例的优雅退出
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, syscall.SIGINT, syscall.SIGTERM) // 捕获系统信号SIGINT、SIGTERM
+
+	select { // 监视来自errChan以及c的事件
+	case err = <-errChan:
+		log.Println("web server run failed:", err)
+		return
+	case <-c:
+		log.Println("bookstore program is exiting...")
+		ctx, cf := context.WithTimeout(context.Background(), time.Second)
+		defer cf()
+		err = srv.Shutdown(ctx) // 优雅关闭http服务实例
+	}
+
+	if err != nil {
+		log.Println("bookstore program exit error: ", err)
+		return
+	}
+	log.Println("bookstore program exit ok")
+}
+```
+
+> 在Go中，main包是整个程序的入口，还是整个程序中==主要模块初始化与组装的场所==。
+
+优雅退出，指的就是**程序有机会等待其他的事情处理完再退出**。比如**尚未完成的事务处理、清理资源（比如关闭文件描述符、关闭socket）、保存必要中间状态、内存数据持久化落盘**等等。
+
+http服务实例内部的退出清理工作，包括：**立即关闭所有listener、关闭所有空闲的连接、等待处于活动状态的连接处理完毕**等等。
+
+
+
+#### 图书数据存储模块（store)
+
+用来**存储整个bookstore的图书数据**的。
+
+图书数据存储有很多种实现方式，最简单的方式莫过于在内存中创建一个map，以图书id作为key，来保存图书信息。生产环境，需要通过Nosql数据库或关系型数据库。
+
+考虑到对多种存储实现方式的支持，将针对图书的有限种存储操作，放置在一个接口类型Store中：
+
+```go
+// store/store.go
+ type Book struct {
+     Id      string   `json:"id"`      // 图书ISBN ID
+     Name    string   `json:"name"`    // 图书名称
+     Authors []string `json:"authors"` // 图书作者
+     Press   string   `json:"press"`   // 出版社
+ }
+ 
+ type Store interface {
+     Create(*Book) error        // 创建一个新图书条目
+     Update(*Book) error        // 更新某图书条目
+     Get(string) (Book, error)  // 获取某图书信息
+     GetAll() ([]Book, error)   // 获取所有图书信息
+     Delete(string) error       // 删除某图书条目
+ }
+```
+
+一个对应图书条目的抽象数据类型Book，以及针对Book存取的接口类型Store。这样，对于想要进行图书数据操作的一方来说，他只需要得到一个满足Store接口的实例，就可以实现对图书数据的存储操作了，不用再关心图书数据究竟采用了何种存储方式。这就实现了**图书存储操作与底层图书数据存储方式的解耦**。而且，这种==面向接口编程==也是Go组合设计哲学的一个重要体现。
+
+> 如何创建一个满足Store接口的实例呢？
+
+参考《设计模式》提供的多种创建型模式，选择一种Go风格的工厂模式（创建型模式的一种）来实现满足Store接口实例的创建。`store/factory`包:
+
+```go
+// store/factory/factory.go
+package factory
+
+import (
+	"bookstore/store"
+	"fmt"
+	"sync"
+)
+
+var (
+	providersMu sync.RWMutex
+	providers   = make(map[string]store.Store) // 使用map类型对工厂可以“生产”的、满足Store接口的实例类型进行管理
+)
+
+// Register 让各个实现Store接口的类型可以把自己“注册”到工厂中来
+func Register(name string, p store.Store) {
+	providersMu.Lock()
+	defer providersMu.Unlock()
+	if p == nil {
+		panic("store: Register provider is nil")
+	}
+
+	if _, dup := providers[name]; dup {
+		panic("store: Register called twice for provider " + name)
+	}
+	providers[name] = p
+}
+
+// New 传入期望使用的图书存储实现的名称，得到对应的类型实例
+func New(providerName string) (store.Store, error) {
+	providersMu.RLock()
+	p, ok := providers[providerName]
+	providersMu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("store: unknown provider %s", providerName)
+	}
+	return p, nil
+}
+```
+
+
+
+一个基于内存map的Store接口的实现:
+
+```go
+// internal/store/memstore.go
+package store
+
+import (
+	mystore "bookstore/store"
+	factory "bookstore/store/factory"
+	"sync"
+)
+
+func init() {
+	factory.Register("mem", &MemStore{
+		books: make(map[string]*mystore.Book),
+	})
+}
+
+// MemStore 是一个基于内存map的Store接口的实现
+type MemStore struct {
+	sync.RWMutex
+	books map[string]*mystore.Book
+}
+
+// ...具体实现方法
+```
+
+init函数中调用factory包提供的Register函数，把自己的实例以“mem”的名称注册到factory中的。这样做有一个好处，依赖Store接口进行图书数据管理的一方，只要导入internal/store这个包，就可以自动完成注册动作了。
+
+```go
+import (
+  ... ...
+  _ "bookstore/internal/store" // internal/store将自身注册到factory中
+)
+
+func main() {
+    s, err := factory.New("mem") // 创建名为"mem"的图书数据存储模块实例
+    if err != nil {
+        panic(err)
+    }
+    ... ...
+}   
+```
+
+#### HTTP服务模块（server）
+
+HTTP服务模块的职责是**对外提供HTTP API服务，处理来自客户端的各种请求，并通过Store接口实例执行针对图书数据的相关操作**。
+
+
+
+#### 编译、运行与验证
+
+
+
+```sh
+$ curl -X POST -H "Content-Type:application/json" -d '{"id": "978-7-111-55842-2", "name": "The Go Programming Language", "authors":["Alan A.A.Donovan", "Brian W. Kergnighan"],"press": "Pearson Education"}' localhost:8080/book
+
+
+
+$ curl -X GET -H "Content-Type:application/json" localhost:8080/book/978-7-111-55842-2
+{"id":"978-7-111-55842-2","name":"The Go Programming Language","authors":["Alan A.A.Donovan","Brian W. Kergnighan"],"press":"Pearson Education"}
+```
 
 
 
