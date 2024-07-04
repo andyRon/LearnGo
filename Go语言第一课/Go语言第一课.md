@@ -2150,9 +2150,299 @@ var sl1 []int
 var sl2 = []int{}
 ```
 
-
+`sl1` 是一个未初始化的切片，它指向一个空数组，而 `sl2` 是一个初始化的切片，它指向一个虽然为空但实际存在的数组。在使用切片时，需要确保其不为 `nil`，因为 `nil` 切片无法被索引，也不能进行其他操作。
 
 ## 16 复合数据类型：原生map类型的实现机制是怎样的？
+
+map(映射、哈希表或字典)
+
+map是切片之后，第二个由**Go编译器与运行时联合实现**的复合数据类型，它有着**复杂的内部实现**，但却提供了十分简单友好的开发者使用接口。
+
+### 什么是map类型？
+
+```go
+map[key_type]value_type
+```
+
+```go
+map[string]string // key与value元素的类型相同
+map[int]string    // key与value元素的类型不同
+```
+
+如果两个map类型的key元素类型相同，value元素类型也相同，那么它们是**同一个map类型**，否则就是不同的map类型。
+
+map类型对value的类型没有限制，但是对key的类型却有严格要求，因为map类型要保证**key的唯一性**，**key的类型必须支持“==”和“!=”两种比较操作符**。
+
+在Go语言中，**函数类型、map类型自身，以及切片**只支持与nil的比较，而不支持同类型两个变量的比较，不能作为map的key类型的。
+
+```go
+s1 := make([]int, 1)
+s2 := make([]int, 2)
+f1 := func() {}
+f2 := func() {}
+m1 := make(map[int]string)
+m2 := make(map[int]string)
+println(s1 == s2) // 错误：invalid operation: s1 == s2 (slice can only be compared to nil)
+println(f1 == f2) // 错误：invalid operation: f1 == f2 (func can only be compared to nil)
+println(m1 == m2) // 错误：invalid operation: m1 == m2 (map can only be compared to nil)
+```
+
+### map变量的声明和初始化
+
+```go
+var m map[string]int // 一个map[string]int类型的变量
+```
+
+有显式地赋予map变量初值，map类型变量的默认值为nil。
+
+初值为零值nil的切片类型变量，可以借助内置的append的函数进行操作，这种在Go语言中被称为“==零值可用==”。定义“零值可用”的类型，可以提升开发者的使用体验，不用再担心变量的初始状态是否有效。
+
+但map类型，因为它**内部实现的复杂性，无法“零值可用”**。所以，如果对处于零值状态的map变量直接进行操作，就会导致运行时异常（panic），从而导致程序进程异常退出：
+
+```go
+var m map[string]int // m = nil
+m["key"] = 1         // 发生运行时异常：panic: assignment to entry in nil map
+```
+
+所以，**必须对map类型变量进行显式初始化后才能使用**。
+
+为map类型变量显式赋值有两种方式:
+
+#### 方法一：使用复合字面值初始化map类型变量
+
+```go
+m := map[int]string{}
+```
+
+此时m不是nil，对其进行键值对操作，不会引发运行时异常
+
+```go
+m1 := map[int][]string{
+  1: []string{"val1_1", "val1_2"},
+  3: []string{"val3_1", "val3_2", "val3_3"},
+  7: []string{"val7_1"},
+}
+```
+
+```go
+type Position struct { 
+  x float64 
+  y float64
+}
+
+m2 := map[Position]string{
+  Position{29.935523, 52.568915}: "school",
+  Position{25.352594, 113.304361}: "shopping-mall",
+  Position{73.224455, 111.804306}: "hospital",
+}
+```
+
+“语法糖”，允许省略字面值中的元素类型，简写为：
+
+```go
+m2 := map[Position]string{
+  {29.935523, 52.568915}: "school",
+  {25.352594, 113.304361}: "shopping-mall",
+  {73.224455, 111.804306}: "hospital",
+}
+```
+
+#### 方法二：使用make为map类型变量进行显式初始化
+
+```go
+m1 := make(map[int]string) // 未指定初始容量
+m2 := make(map[int]string, 8) // 指定初始容量为8
+```
+
+### map的基本操作
+
+#### 1️⃣插入新键值对
+
+```go
+m := make(map[int]string)
+m[1] = "value1"
+m[2] = "value2"
+m[3] = "value3"
+
+
+m := map[string]int {
+	"key1" : 1,
+	"key2" : 2,
+}
+
+m["key1"] = 11 // 11会覆盖掉"key1"对应的旧值1
+m["key3"] = 3  // 此时m为map[key1:11 key2:2 key3:3]
+
+     
+```
+
+#### 2️⃣获取键值对数量
+
+```go
+m := map[string]int {
+	"key1" : 1,
+	"key2" : 2,
+}
+
+fmt.Println(len(m)) // 2
+m["key3"] = 3  
+fmt.Println(len(m)) // 3 
+```
+
+> 不能对map类型变量调用cap，来获取当前容量
+
+#### 3️⃣查找和数据读取
+
+```go
+m := make(map[string]int)
+v := m["key1"]  // 如果这个键在map中并不存在，也会得到一个值：value元素类型的零值。
+```
+
+不能用上面的方法判断某个key是否在map中。
+
+Go语言的map类型支持通过用一种名为“==comma ok==”的惯用法，进行对某个key的查询。
+
+```go
+m := make(map[string]int)
+v, ok := m["key1"]
+if !ok {
+    // "key1"不在map中
+}
+
+// "key1"在map中，v将被赋予"key1"键对应的value
+```
+
+#### 4️⃣删除数据
+
+```go
+delete(m, "key2")
+```
+
+delete函数是从map中删除键的唯一方法。
+
+#### 5️⃣遍历map中的键值数据
+
+在Go中，遍历map的键值对只有一种方法，那就是像对待切片那样通过**for range**语句对map数据进行遍历。
+
+```go
+package main
+  
+import "fmt"
+
+func main() {
+    m := map[int]int{
+        1: 11,
+        2: 12,
+        3: 13,
+    }
+
+    fmt.Printf("{ ")
+    for k, v := range m {
+        fmt.Printf("[%d, %d] ", k, v)
+    }
+    fmt.Printf("}\n")
+} 
+```
+
+
+
+> 程序逻辑千万不要依赖遍历map所得到的的元素次序。
+
+### map变量的传递开销
+
+
+
+```go
+package main
+  
+import "fmt"
+
+func foo(m map[string]int) {
+    m["key1"] = 11
+    m["key2"] = 12
+}
+
+func main() {
+    m := map[string]int{
+        "key1": 1,
+        "key2": 2,
+    }
+
+    fmt.Println(m) // map[key1:1 key2:2]  
+    foo(m)
+    fmt.Println(m) // map[key1:11 key2:12] 
+}
+```
+
+
+
+### map的内部实现 🔖
+
+Go运行时使用一张哈希表来实现抽象的map类型。运行时实现了map类型操作的所有功能，包括查找、插入、删除等。在编译阶段，Go编译器会将Go语法层面的map操作，重写成运行时对应的函数调用。大致的对应关系是这样的：
+
+```go
+// 创建map类型变量实例
+m := make(map[keyType]valType, capacityhint) → m := runtime.makemap(maptype, capacityhint, m)
+
+// 插入新键值对或给键重新赋值
+m["key"] = "value" → v := runtime.mapassign(maptype, m, "key") v是用于后续存储value的空间的地址
+
+// 获取某键的值 
+v := m["key"]      → v := runtime.mapaccess1(maptype, m, "key")
+v, ok := m["key"]  → v, ok := runtime.mapaccess2(maptype, m, "key")
+
+// 删除某键
+delete(m, "key")   → runtime.mapdelete(maptype, m, “key”)
+```
+
+map类型在Go运行时层实现的示意图：
+
+![](images/image-20240704110944559.png)
+
+#### 初始状态
+
+![](images/image-20240704111147145.png)
+
+##### tophash区域
+
+![](images/image-20240704111237832.png)
+
+
+
+##### key存储区域
+
+
+
+```go
+type maptype struct {
+  typ        _type
+  key        *_type
+  elem       *_type
+  bucket     *_type // internal type representing a hash bucket
+  keysize    uint8  // size of key slot
+  elemsize   uint8  // size of elem slot
+  bucketsize uint16 // size of bucket
+  flags      uint32
+} 
+
+    
+```
+
+
+
+Go运行时就是利用maptype参数中的信息确定key的类型和大小的。
+
+
+
+##### value存储区域
+
+![](images/image-20240704111348684.png)
+
+### map扩容
+
+
+
+### map与并发
 
 
 
@@ -2160,13 +2450,232 @@ var sl2 = []int{}
 
 ## 17 复合数据类型：用结构体建立对真实世界的抽象
 
+> 编写程序的目的就是与真实世界交互，解决真实世界的问题，帮助真实世界提高运行效率与改善运行质量。
+
+之前有基本数据类型和三个复合数据类型，还缺少一种**==通用的、对实体对象进行聚合抽象==**的能力。==结构体类型==（`struct`）
+
+### 如何自定义一个新类型？
+
+1. 第一种是==类型定义==（Type Definition）
+
+```go
+type T S // 定义一个新类型T
+```
+
+S可以是任何一个已定义的类型，包括Go原生类型或者自定义类型
+
+```go
+type T1 int 
+type T2 T1  
+```
+
+如果一个新类型是基于某个Go原生类型定义的，那么这个Go原生类型为新类型的==底层类型（Underlying Type)==。上面的例子中，T1、T2的底层类型都是int。
+
+> 为什么要提到底层类型这个概念呢？
+>
+> 因为底层类型在Go语言中有重要作用，它被用来==判断两个类型本质上是否相同==（Identical）。
+
+T1和T2的底层类型都是类型int，所以它们在本质上是相同的。而**本质上相同的两个类型，它们的变量可以通过显式转型进行相互赋值，相反，如果本质上是不同的两个类型，它们的变量间连显式转型都不可能，更不要说相互赋值了**。
+
+除了基于已有类型定义新类型之外，还可以**==基于类型字面值==**来定义新类型，这种方式多用于自定义一个新的复合类型：
+
+```go
+type M map[int]string
+type S []string
+```
+
+类型定义也支持通过type块的方式:
+
+```go
+type (
+   T1 int
+   T2 T1
+   T3 string
+)
+```
+
+2. 第二种是类型别名（Type Alias）。这种类型定义方式通常用在项目的**渐进式重构**，还有对已有包的**二次封装方面**。
+
+```go
+type T = S // type alias
+```
+
+类型别名并没有定义出新类型，T与S实际上就是**同一种类型**。
+
+### 如何定义一个结构体类型？
+
+复合类型的定义一般都是通过类型字面值的方式来进行的，作为复合类型之一的结构体类型也不例外:
+
+```go
+type T struct {
+    Field1 T1
+    Field2 T2
+    ... ...
+    FieldN Tn
+}
+```
+
+
+
+还可以用**空标识符“`_`”作为结构体类型定义中的字段名称**。这样以空标识符为名称的字段，不能被外部包引用，甚至无法被结构体所在的包使用。
+
+其他几种特殊情况：
+
+#### 空结构体
+
+```go
+type Empty struct{} // Empty是一个不包含任何字段的空结构体类型
+```
+
+空结构体类型有什么用呢？
+
+```go
+var s Empty
+println(unsafe.Sizeof(s)) // 0
+```
+
+空结构体类型变量的内存占用为0。基于**空结构体类型内存零开销**这样的特性，在日常Go开发中会经常使用空结构体类型元素，作为一种“事件”信息进行Goroutine之间的通信:
+
+```go
+var c = make(chan Empty) // 声明一个元素类型为Empty的channel
+c<-Empty{}               // 向channel写入一个“事件”
+```
+
+这种以空结构体为元素类建立的channel，是目前能实现的、内存占用最小的Goroutine间通信方式。
+
+#### 使用其他结构体作为自定义结构体中字段的类型
+
+```go
+type Person struct {
+  Name string
+  Phone string
+  Addr string
+}
+
+type Book struct {
+  Title string
+  Author Person
+  ... ...
+}  
+```
+
+
+
+嵌入字段（Embedded Field） 🔖
+
+
+
+### 结构体变量的声明与初始化
+
+#### 零值初始化
+
+
+
+#### 使用复合字面值
+
+最简单的对结构体变量进行显式初始化的方式，就是**按顺序依次给每个结构体字段进行赋值**。
+
+
+
+
+
+“`field:value`”形式的复合字面值
+
+```go
+var t = T{
+  F2: "hello",
+  F1: 11,
+  F4: 14,
+} 
+```
+
+
+
+#### 使用特定的构造函数
+
+```go
+// $GOROOT/src/time/sleep.go
+type runtimeTimer struct {
+    pp       uintptr
+    when     int64
+    period   int64
+    f        func(interface{}, uintptr) 
+    arg      interface{}
+    seq      uintptr
+    nextwhen int64
+    status   uint32
+}
+
+type Timer struct {
+    C <-chan Time
+    r runtimeTimer
+}
+
+
+func NewTimer(d Duration) *Timer {
+    c := make(chan Time, 1)
+    t := &Timer{
+        C: c,
+        r: runtimeTimer{
+            when: when(d),
+            f:    sendTime,
+            arg:  c,
+        },
+    }
+    startTimer(&t.r)
+    return t
+}
+```
+
+
+
+### 结构体类型的内存布局 🔖
+
+![](images/image-20240704120037598.png)
+
+
+
+
+
 
 
 ## 18 控制结构：if的“快乐路径”原则
 
+Go中程序的分支结构：if和switch-case两种语句形式；循环结构：只有for。
+
 
 
 ## 19 控制结构：Go的for循环，仅此一种
+
+### for语句的经典使用形式
+
+
+
+### for range
+
+
+
+### 带label的continue语句
+
+
+
+### break语句的使用
+
+
+
+### for语句的常见“坑”与避坑方法
+
+#### 1️⃣循环变量的重用
+
+
+
+#### 2️⃣参与循环的是range表达式的副本
+
+
+
+#### 3️⃣遍历map中元素的随机性
+
+
 
 
 
@@ -2174,11 +2683,116 @@ var sl2 = []int{}
 
 ## 20 控制结构：Go中的switch语句有哪些变化？
 
+### switch语句的灵活性
+
+**首先，switch语句各表达式的求值结果可以为各种类型值，只要它的类型支持比较操作就可以了。**
+
+**第二点：switch语句支持声明临时变量。**
+
+**第三点：case语句支持表达式列表。**
+
+**第四点：取消了默认执行下一个case代码逻辑的语义。**
+
+### type switch
+
+```go
+func main() {
+    var x interface{} = 13
+    switch x.(type) {
+    case nil:
+        println("x is nil")
+    case int:
+        println("the type of x is int")
+    case string:
+        println("the type of x is string")
+    case bool:
+        println("the type of x is string")
+    default:
+        println("don't support the type")
+    }
+}
+```
+
+
+
+### 跳不出循环的break
+
 
 
 ## 21 函数：请叫我“一等公民”
 
+函数是现代编程语言的基本语法元素，无论是在命令式语言、面向对象语言还是动态脚本语言中，函数都位列C位。
 
+在Go语言中，**函数是唯一一种基于特定输入，实现特定任务并可返回任务执行结果的代码块**（Go语言中的方法本质上也是函数）。
+
+如果忽略Go包在Go代码组织层面的作用，可以说**Go程序就是一组函数的集合**。
+
+### Go函数与函数声明
+
+普通Go函数的声明：
+
+![](images/image-20240704122156576.png)
+
+==变长参数==，在类型前面增加了一个“`…`”符号。
+
+**具名返回值**
+
+把上面的函数声明等价转换为变量声明的形式：
+
+![](images/image-20240704122531758.png)
+
+**这不就是在声明一个类型为函数类型的变量吗**！
+
+**函数声明中的函数名其实就是变量名**，函数声明中的**func关键字、参数列表和返回值列表**共同构成了**==函数类型==**。而参数列表与返回值列表的组合也被称为**==函数签名==**，它是决定两个函数类型是否相同的决定因素。因此，函数类型也可以看成是由func关键字与函数签名组合而成的。
+
+通常，在表述函数类型时会省略函数签名参数列表中的参数名，以及返回值列表中的返回值变量名：
+
+```go
+func(io.Writer, string, ...interface{}) (int, error)
+```
+
+这样，如果两个函数类型的函数签名是相同的，即便参数列表中的参数名，以及返回值列表中的返回值变量名都是不同的，那么这两个函数类型也是相同类型。
+
+结论：**每个函数声明所定义的函数，仅仅是对应的函数类型的一个实例**，就像var a int = 13这个变量声明语句中a是int类型的一个实例一样。
+
+
+
+类似17中，使用复合类型字面值对结构体类型变量进行显式初始化的内容
+
+```go
+s := T{}      // 使用复合类型字面值对结构体类型T的变量进行显式初始化
+f := func(){} // 使用变量声明形式的函数声明
+```
+
+`T{}`被为==复合类型字面值==；`func(){}`就叫“==函数字面值（Function Literal）==”，它特别像一个没有函数名的函数声明，因此也叫它==匿名函数==。
+
+
+
+#### 函数参数的那些事儿
+
+由于函数分为声明与使用两个阶段，在不同阶段，参数的称谓也有不同。在函数声明阶段，把参数列表中的参数叫做**形式参数**（Parameter，简称形参），在函数体中，使用的都是形参；而在函数实际调用时传入的参数被称为**实际参数**（Argument，简称实参）。
+
+![](images/image-20240704123547073.png)
+
+#### 函数支持多返回值
+
+
+
+### 函数是“一等公民”
+
+特征一：Go函数可以存储在变量中。
+
+特征二：支持在函数内创建并通过返回值返回。
+
+特征三：作为参数传入函数。
+
+特征四：拥有自己的类型。
+
+### 函数“一等公民”特性的高效运用
+
+应用一：函数类型的妙用
+
+应用二：利用闭包简化函数调用。
 
 
 
