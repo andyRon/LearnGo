@@ -1656,9 +1656,499 @@ fmt.Println(s2) // 中国人
 
 ## 14 常量：Go在“常量”设计上的创新有哪些？
 
+Go语言在常量方面的创新：
+
+- 支持无类型常量；
+- 支持隐式自动转型；
+- 可用于实现枚举。
+
+### 常量以及Go原生支持常量的好处
+
+Go语言的常量是一种**在源码编译期间被创建的语法元素**。
+
+
+
+```go
+const Pi float64 = 3.14159265358979323846 // 单行常量声明
+
+// 以const代码块形式声明常量
+const (
+    size int64 = 4096
+    i, j, s = 13, 14, "bar" // 单行声明多个常量
+)
+
+    
+```
+
+Go常量的类型只局限于基本数据类型，包括**数值类型、字符串类型，以及只有两个取值（true和false）的布尔类型**。
+
+> 原生不支持常量的C语言
+>
+> 在C语言中，**字面值担负着常量的角色**，可以使用数值型、字符串型字面值来应对不同场合对常量的需求。
+>
+> 为了不让这些字面值以“魔数（Magic Number）”的形式分布于源码各处，早期C语言的常用实践是使用**宏（macro）**定义记号来指代这些字面值，这种定义方式被称为**宏定义常量**，比如：
+>
+> ```c
+> #define FILE_MAX_LEN 0x22334455
+> #define PI 3.1415926
+> #define GO_GREETING "Hello, Gopher"
+> #define A_CHAR 'a'
+> ```
+>
+> **宏定义的常量会有很多问题**。比如，它是一种仅在预编译阶段进行替换的字面值，继承了宏替换的复杂性和易错性，而且还有类型不安全、无法在调试时通过宏名字输出常量的值，等等问题。
+>
+> 后续C标准中提供的const关键字修饰的标识符，也依然不是一种圆满方案。因为const关键字修饰的标识符本质上依旧是变量，它甚至无法用作数组变量声明中的初始长度（除非用GNU扩展C）。
+>
+> ```c
+> const int size = 5;
+> int a[size] = {1,2,3,4,5}; // size本质不是常量，这将导致编译器错误 
+> ```
+>
+> 
+
+### 无类型常量
+
+Go语言对类型安全是有严格要求的：**即便两个类型拥有着相同的底层类型，但它们仍然是不同的数据类型，不可以被相互比较或混在一个表达式中进行运算**。
+
+这一要求不仅仅适用于变量，也同样适用于有类型常量（Typed Constant）。
+
+```go
+type myInt int
+const n myInt = 13
+const m int = n + 5 // 编译器报错：cannot use n + 5 (type myInt) as type int in const initializer
+
+func main() {
+    var a int = 5
+    fmt.Println(a + n) // 编译器报错：invalid operation: a + n (mismatched types int and myInt)
+}
+```
+
+而且，**有类型常量与变量混合在一起进行运算求值的时候，也必须遵守类型相同这一要求**，否则我们只能通过显式转型才能让上面代码正常工作
+
+```go
+type myInt int
+const n myInt = 13
+const m int = int(n) + 5  // OK
+
+func main() {
+    var a int = 5
+    fmt.Println(a + int(n))  // 输出：18
+}
+```
+
+也可以使用Go中的==无类型常量（Untyped Constant）==来实现：
+
+```go
+type myInt int
+const n = 13
+
+func main() {
+    var a myInt = 5
+    fmt.Println(a + n)  // 输出：18
+} 
+```
+
+
+
+常量n的默认类型int与myInt并不是同一个类型啊，为什么可以放在一个表达式中计算而没有报编译错误呢？
+
+### 隐式转型
+
+对于无类型常量参与的表达式求值，Go编译器会根据上下文中的类型信息，把无类型常量自动转换为相应的类型后，再参与求值计算，这一转型动作是隐式进行的。
+
+但由于转型的对象是一个常量，所以这并不会引发类型安全问题，Go编译器会保证这一转型的安全性。
+
+如果Go编译器在做隐式转型时，发现无法将常量转换为目标类型，Go编译器也会报错：
+
+```go
+const m = 1333333333
+
+var k int8 = 1
+j := k + m // 编译器报错：constant 1333333333 overflows int8 
+```
+
+### 实现枚举
+
+Go语言其实并没有原生提供枚举类型。
+
+Go语言中，可以使用**const代码块**定义的常量集合，来实现枚举。这是因为枚举类型本质上就是一个由**有限数量常量**所构成的集合。
+
+Go将C语言枚举类型的这种基于前一个枚举值加1的特性，分解成了Go中的两个特性：**自动重复上一行，以及引入const块中的行偏移量指示器`iota`**，这样它们就可以分别独立使用了。
+
+- Go的const语法提供了“隐式重复前一个非空表达式”的机制
+
+```go
+const (
+  Apple, Banana = 11, 22
+  Strawberry, Grape 
+  Pear, Watermelon 
+)
+```
+
+这里常量定义的后两行并没有被显式地赋予初始值，所以Go编译器就为它们自动使用上一行的表达式，也就获得了下面这个等价的代码：
+
+```go
+const (
+  Apple, Banana = 11, 22
+  Strawberry, Grape  = 11, 22 // 使用上一行的初始化表达式
+  Pear, Watermelon  = 11, 22 // 使用上一行的初始化表达式
+) 
+```
+
+- `iota`
+
+iota是Go语言的一个==预定义标识符==，它表示的是const声明块（包括单行声明）中，每个常量所处位置在块中的**偏移值**（从零开始）。
+
+同时，每一行中的iota自身也是一个无类型常量，可以像前面我们提到的无类型常量那样，自动参与到不同类型的求值过程中来，不需要我们再对它进行显式转型操作。
+
+比如Go标准库中sync/mutex.go中的一段基于iota的枚举常量的定义：
+
+```go
+// $GOROOT/src/sync/mutex.go 
+const ( 
+    mutexLocked = 1 << iota
+    mutexWoken
+    mutexStarving
+    mutexWaiterShift = iota
+    starvationThresholdNs = 1e6
+)
+```
+
+首先，这个const声明块的第一行是`mutexLocked = 1 << iota` ，iota的值是这行在const块中的偏移，因此iota的值为0，得到`mutexLocked`这个常量的值为`1 << 0`，也就是1。
+
+着，第二行：mutexWorken 。因为这个const声明块中并没有显式的常量初始化表达式，所以我们根据const声明块里“隐式重复前一个非空表达式”的机制，这一行就等价于mutexWorken = 1 << iota。而且，又因为这一行是const块中的第二行，所以它的偏移量iota的值为1，我们得到mutexWorken这个常量的值为1 << 1，也就是2。
+
+然后是mutexStarving。这个常量同mutexWorken一样，这一行等价于mutexStarving = 1 << iota。而且，也因为这行的iota的值为2，我们可以得到mutexStarving这个常量的值为 1 << 2，也就是4;
+
+再然后看mutexWaiterShift = iota 这一行，这一行为常量mutexWaiterShift做了显式初始化，这样就不用再重复前一行了。由于这一行是第四行，而且作为行偏移值的iota的值为3，因此mutexWaiterShift的值就为3。
+
+最后一行，代码中直接用了一个具体值1e6给常量starvationThresholdNs进行了赋值，那么这个常量值就是1e6本身了。
+
+> 提醒:位于同一行的iota即便出现多次，多个iota的值也是一样的.
+>
+> ```go
+> const (
+>   Apple, Banana = iota, iota + 10 // 0, 10 (iota = 0)
+>   Strawberry, Grape // 1, 11 (iota = 1)
+>   Pear, Watermelon  // 2, 12 (iota = 2)
+> )
+> ```
+>
+> 
+
+```go
+// $GOROOT/src/syscall/net_js.go
+const (
+    _ = iota
+    IPV6_V6ONLY  // 1
+    SOMAXCONN    // 2
+    SO_ERROR     // 3
+)
+```
+
+枚举常量值并不连续时，也可以借助空白标识符来实现：
+
+```go
+const (
+  _ = iota // 0
+  Pin1
+  Pin2
+  Pin3
+  _
+  Pin5    // 5   
+) 
+```
+
+
+
+iota特性让**维护枚举常量列表变得更加容易**。
+
+比如使用传统的枚举常量声明方式，来声明一组按首字母排序的“颜色”常量：
+
+```go
+const ( 
+  Black  = 1 
+  Red    = 2
+  Yellow = 3
+)
+```
+
+要增加一个新颜色Blue:
+
+```go
+const (
+  Blue   = 1
+  Black  = 2
+  Red    = 3
+  Yellow = 4
+)
+```
+
+使用iota重新定义:
+
+```go
+const (
+  _ = iota     
+  Blue
+  black
+  Red 
+  Yellow     
+) 
+```
+
+这样，无论后期我们需要增加多少种颜色，只需将常量名插入到对应位置就可以，其他就不需要再做任何手工调整了。
+
+
+
+如果一个Go源文件中有多个const代码块定义的不同枚举，每个const代码块中的iota也是独立变化的:
+
+```go
+const (
+  a = iota + 1 // 1, iota = 0
+  b            // 2, iota = 1
+  c            // 3, iota = 2
+)
+
+const (
+    i = iota << 1 // 0, iota = 0
+    j             // 2, iota = 1
+    k             // 4, iota = 2
+)
+```
+
+### 思考题
+
+> 虽然iota带来了灵活性与便利，但是否存在一些场合，在定义枚举常量时使用显式字面值更为适合呢？
+
 
 
 ## 15 同构复合类型：从定长数组到变长切片
+
+==复合类型==：由多个同构类型（相同类型）或异构类型（不同类型）的元素的值组合而成。
+
+Go原生内置了多种复合数据类型，包括**数组、切片（slice）、map、结构体，以及channel**等。
+
+### 数组有哪些基本特性？
+
+Go语言的数组是一个长度固定的、由同构类型元素组成的连续序列。
+
+两个重要属性：==元素的类型==和==数组长度==。
+
+```go
+var arr [N]T
+```
+
+组元素的类型可以为**任意的Go原生类型或自定义类型**。
+
+如果两个数组类型的元素类型T与数组长度N都是一样的，那么这两个数组类型是等价的，如果有一个属性不同，它们就是两个不同的数组类型。
+
+**数组类型不仅是逻辑上的连续序列，而且在实际内存分配时也占据着一整块内存**。
+
+
+
+预定义函数`len`可以用于获取一个数组类型变量的长度，通过unsafe包提供的`Sizeof`函数可以获得一个数组变量的总大小：
+
+```go
+var arr = [6]int{1, 2, 3, 4, 5, 6}
+fmt.Println("数组长度：", len(arr))           // 6
+fmt.Println("数组大小：", unsafe.Sizeof(arr)) // 48 
+```
+
+
+
+声明一个数组类型变量，如果不进行显式初始化，那么数组中的元素值就是它类型的零值。
+
+```go
+var arr1 [6]int // [0 0 0 0 0 0]
+```
+
+显示初始化：
+
+```go
+var arr2 = [6]int {
+  11, 12, 13, 14, 15, 16,
+} // [11 12 13 14 15 16]
+
+var arr3 = [...]int {
+    21, 22, 23,
+} // [21 22 23]
+fmt.Printf("%T\n", arr3) // [3]int
+```
+
+可以忽略掉右值初始化表达式中数组类型的长度，用“`…`”替代，Go编译器会根据数组元素的个数，自动计算出数组长度。
+
+对一个长度较大的稀疏数组进行显式初始化：
+
+```go
+var arr4 = [...]int{
+  99: 39, // 将第100个元素(下标值为99)的值赋值为39，其余元素值均为0
+}
+fmt.Printf("%T\n", arr4) // [100]int
+```
+
+### 多维数组
+
+```go
+var mArr [2][3][4]int
+```
+
+![](images/image-20240704072318759.png)
+
+
+
+数组类型变量是一个整体，这就意味着**一个数组变量表示的是整个数组**。这点与C语言完全不同，在C语言中，**数组变量可视为指向数组第一个元素的指针**。
+
+这样一来，无论是参与迭代，还是作为实际参数传给一个函数/方法，Go传递数组的方式都是纯粹的**值拷贝**，这会带来较大的内存拷贝开销。解决办法：指针或切片。
+
+### 切片
+
+数组两点不足：**固定的元素个数，以及传值机制下导致的开销较大**。
+
+==切片（slice）==，来弥补数组的这两处不足。
+
+切片的声明并初始化，相对于数组少了长度：
+
+```go
+var nums = []int{1,2,3,4,5,6}
+```
+
+```go
+fmt.Println(len(nums)) // 6
+
+nums = append(nums, 7) // 切片变为[1 2 3 4 5 6 7]
+fmt.Println(len(nums)) // 7
+```
+
+#### Go是如何实现切片类型的？
+
+Go切片在运行时其实是一个三元组结构:
+
+```go
+// runtime/slice.go
+type slice struct {
+	array unsafe.Pointer
+	len   int
+	cap   int
+}
+```
+
+- array: 是指向底层数组的指针；
+- len: 是切片的长度，即切片中当前元素的个数；
+- cap: 是底层数组的长度，也是切片的最大容量，cap值永远大于等于len值。
+
+![](images/image-20240704073320719.png)
+
+**Go编译器会自动为每个新创建的切片**，建立一个底层数组，默认底层数组的长度与切片初始元素个数相同。
+
+创建切片的其他方式：
+
+- 方法一：通过`make`函数来创建切片，并指**定底层数组的长度**。
+
+```go
+sl := make([]byte, 6, 10) // 其中10为cap值，即底层数组长度，6为切片的初始长度
+
+sl := make([]byte, 6) // cap = len = 6
+```
+
+- 方法二：采用`array[low : high : max]`语法基于一个已存在的数组创建切片。这种方式被称为==数组的切片化==
+
+```go
+arr := [10]int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+sl := arr[3:7:9]
+```
+
+![](images/image-20240704074015623.png)
+
+基于数组创建的切片，它的起始元素从low所标识的下标值开始，切片的长度（len）是high - low，它的容量是max - low。而且，由于切片sl的底层数组就是数组arr，对切片sl中元素的修改将直接影响数组arr变量。比如，如果我们将切片的第一个元素加10，那么数组arr的第四个元素将变为14：
+
+```go
+sl[0] += 10
+fmt.Println("arr[3] =", arr[3]) // 14
+```
+
+这样看来，**切片好比打开了一个访问与修改数组的“窗口”**，通过这个窗口，可以直接操作底层数组中的**部分元素**。这有些类似于操作文件之前打开的“**文件描述符**”（Windows上称为**句柄**），通过文件描述符我们可以对底层的真实文件进行相关操作。可以说，**切片之于数组就像是文件描述符之于文件**。
+
+在Go语言中，数组更多是“退居幕后”，承担的是**底层存储空间**的角色。切片就是数组的“描述符”，也正是因为这一特性，切片才能在函数参数传递时**避免较大性能开销**。因为传递的并不是数组本身，而是数组的“描述符”，而这个**描述符的大小是固定的**（见上面的三元组结构），无论底层的数组有多大，切片打开的“窗口”长度有多长，它都是不变的。此外，在进行数组切片化的时候，通常省略max，而max的默认值为数组的长度。
+
+另外，针对一个已存在的数组，我们还可以建立多个操作数组的切片，这些切片共享同一底层数组，切片对底层数组的操作也同样会**反映到其他切片中**。
+
+![](images/image-20240704074617178.png)
+
+- 方法三：基于切片创建切片。
+
+这种切片的运行时表示原理与上面的是一样的。
+
+#### 切片的动态扩容
+
+“动态扩容”指当通过append操作向切片追加数据的时候，如果这时切片的len值和cap值是相等的，也就是说切片**底层数组已经没有空闲空间**再来存储追加的值了，Go运行时就会对这个切片做扩容操作，来保证切片始终能存储下追加的新值。也就是会重新分配了其底层数组。
+
+```go
+var s []int
+s = append(s, 11) 
+fmt.Println(len(s), cap(s)) //1 1
+s = append(s, 12) 
+fmt.Println(len(s), cap(s)) //2 2
+s = append(s, 13) 
+fmt.Println(len(s), cap(s)) //3 4
+s = append(s, 14) 
+fmt.Println(len(s), cap(s)) //4 4
+s = append(s, 15) 
+fmt.Println(len(s), cap(s)) //5 8
+```
+
+- 最开始，s初值为零值（nil），这个时候s没有“绑定”底层数组。先通过append操作向切片s添加一个元素11，这个时候，append会先分配底层数组u1（数组长度1），然后将s内部表示中的array指向u1，并设置len = 1, cap = 1;
+- 接着，我们通过append操作向切片s再添加第二个元素12，这个时候len(s) = 1，cap(s) = 1，append判断底层数组剩余空间已经不能够满足添加新元素的要求了，于是它就创建了一个新的底层数组u2，长度为2（u1数组长度的2倍），并把u1中的元素拷贝到u2中，最后将s内部表示中的array指向u2，并设置len = 2, cap = 2；
+- 然后，第三步，我们通过append操作向切片s添加了第三个元素13，这时len(s) = 2，cap(s) = 2，append判断底层数组剩余空间不能满足添加新元素的要求了，于是又创建了一个新的底层数组u3，长度为4（u2数组长度的2倍），并把u2中的元素拷贝到u3中，最后把s内部表示中的array指向u3，并设置len = 3, cap为u3数组长度，也就是4；
+- 第四步，我们依然通过append操作向切片s添加第四个元素14，此时len(s) = 3,cap(s) = 4，append判断底层数组剩余空间可以满足添加新元素的要求，所以就把14放在下一个元素的位置(数组u3末尾），并把s内部表示中的len加1，变为4；
+- 第五步又通过append操作，向切片s添加最后一个元素15，这时len(s) = 4，cap(s) = 4，append判断底层数组剩余空间又不够了，于是创建了一个新的底层数组u4，长度为8（u3数组长度的2倍），并将u3中的元素拷贝到u4中，最后将s内部表示中的array指向u4，并设置len = 5, cap为u4数组长度，也就是8。
+
+总结，针对元素是int型的数组，新数组的容量是当前数组的**==2倍==**。新数组建立后，append会把旧数组中的数据拷贝到新数组中，之后新数组便成为了切片的底层数组，旧数组会被垃圾回收掉。
+
+不过append操作的这种自动扩容行为，有些时候会给我们开发者带来一些困惑，比如基于一个已有数组建立的切片，一旦追加的数据操作触碰到切片的容量上限（实质上也是数组容量的上界)，切片就会和原数组==解除“绑定”==，后续对切片的任何修改都不会反映到原数组中了。
+
+```go
+u := [...]int{11, 12, 13, 14, 15}
+fmt.Println("array:", u) // [11, 12, 13, 14, 15]
+s := u[1:3]
+fmt.Printf("slice(len=%d, cap=%d): %v\n", len(s), cap(s), s) // [12, 13]
+s = append(s, 24)
+fmt.Println("after append 24, array:", u)
+fmt.Printf("after append 24, slice(len=%d, cap=%d): %v\n", len(s), cap(s), s)
+s = append(s, 25)
+fmt.Println("after append 25, array:", u)
+fmt.Printf("after append 25, slice(len=%d, cap=%d): %v\n", len(s), cap(s), s)
+s = append(s, 26)
+fmt.Println("after append 26, array:", u)
+fmt.Printf("after append 26, slice(len=%d, cap=%d): %v\n", len(s), cap(s), s)
+
+s[0] = 22
+fmt.Println("after reassign 1st elem of slice, array:", u)
+fmt.Printf("after reassign 1st elem of slice, slice(len=%d, cap=%d): %v\n", len(s), cap(s), s)
+```
+
+结果：
+
+```go
+array: [11 12 13 14 15]
+slice(len=2, cap=4): [12 13]
+after append 24, array: [11 12 13 24 15]
+after append 24, slice(len=3, cap=4): [12 13 24]
+after append 25, array: [11 12 13 24 25]
+after append 25, slice(len=4, cap=4): [12 13 24 25]
+after append 26, array: [11 12 13 24 25]
+after append 26, slice(len=5, cap=8): [12 13 24 25 26]
+after reassign 1st elem of slice, array: [11 12 13 24 25]
+after reassign 1st elem of slice, slice(len=5, cap=8): [22 13 24 25 26]
+```
+
+### 思考题
+
+下下面这两个切片变量sl1与sl2的差异:
+
+```go
+var sl1 []int
+var sl2 = []int{}
+```
 
 
 
