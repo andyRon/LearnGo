@@ -2,16 +2,16 @@ package pkg2
 
 import (
 	"fmt"
-	//"github.com/andyorn/prog-init-order/pkg3"
+	_ "github.com/andyron/prog-init-order/pkg3"
+)
+
+const (
+	c = "c"
 )
 
 var (
 	_ = constInitCheck()
 	v = variableInit("v")
-)
-
-const (
-	c = "c"
 )
 
 func constInitCheck() string {

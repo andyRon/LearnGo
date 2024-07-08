@@ -576,17 +576,15 @@ vendor
 
 
 
-## 08 入口函数与包初始化：搞清Go程序的执行次序
+## 8 入口函数与包初始化：搞清Go程序的执行次序
 
 ### main.main函数：Go应用的入口函数
 
 Go语言要求：**可执行程序的main包必须定义main函数，否则Go编译器会报错**。在启动了多个Goroutine的Go应用中，main.main函数将在Go应用的主Goroutine中执行。
 
-不过很有意思的是，在多Goroutine的Go应用中，相较于main.main作为Go应用的入口，**main.main函数返回的意义其实更大**，因为main函数返回就意味着整个Go程序的终结，而且你也不用管这个时候是否还有其他子Goroutine正在执行。
+不过很有意思的是，在多Goroutine的Go应用中，相较于main.main作为Go应用的==入口==，**main.main函数==返回==的意义其实更大**，因为main函数返回就意味着**整个Go程序的终结**，而且你也不用管这个时候是否还有其他子Goroutine正在执行。
 
-
-
-除了main包外，其他包也可以拥有自己的名为main的函数或方法。但按照Go的可见性规则（小写字母开头的标识符为非导出标识符），非main包中自定义的main函数仅限于包内使用。
+除了main包外，其他包也可以拥有自己的名为main的函数或方法。但按照Go的**可见性规则**（小写字母开头的标识符为非导出标识符），非main包中自定义的main函数仅限于包内使用。
 
 > 对于main包的main函数来说，虽然是用户层逻辑的入口函数，但它却**不一定是用户层第一个被执行的函数**。
 
@@ -594,11 +592,13 @@ Go语言要求：**可执行程序的main包必须定义main函数，否则Go编
 
 如果main包依赖的包中定义了init函数，或者是main包自身定义了init函数，那么Go程序在这个包初始化的时候，就会自动调用它的init函数，因此这些init函数的执行就都会发生在main函数之前。
 
+每个组成Go包的Go源文件中，可以定义多个init函数。
 
+在初始化Go包时，Go会按照一定的次序，**逐一、顺序地**调用这个包的init函数。一般来说，先传递给Go编译器的源文件中的init函数，会先被执行；而同一个源文件中的多个init函数，会按**声明顺序**依次执行。
 
 ### Go包的初始化次序
 
-从程序逻辑结构角度来看，Go包是程序逻辑封装的基本单元，每个包都可以理解为是一个“自治”的、封装良好的、对外部暴露有限接口的基本单元。一个Go程序就是由一组包组成的，程序的初始化就是这些包的初始化。每个Go包还会有自己的依赖包、常量、变量、init函数（其中main包有main函数）等。
+从程序逻辑结构角度来看，Go包是程序逻辑封装的基本单元，每个包都可以理解为是一个“自治”的、封装良好的、对外部暴露**有限接口**的**基本单元**。**一个Go程序就是由一组包组成的，程序的初始化就是这些包的初始化**。每个Go包还会有自己的依赖包、常量、变量、init函数（其中main包有main函数）等。
 
 > 注意📢：我们在阅读和理解代码的时候，需要知道这些元素在在程序初始化过程中的初始化顺序，这样便于我们确定在某一行代码处这些元素的当前状态。
 
@@ -614,7 +614,7 @@ Go包的初始化次序：
 
 
 
-🔖  包引入错误？变量和常量的执行顺序为什么反了？
+🔖  包引入错误？变量和常量的执行顺序为什么反了？  [Go 1.22引入的包级变量初始化次序问题 | Tony Bai](https://tonybai.com/2024/03/29/the-issue-in-pkg-level-var-init-order-in-go-1-22/)
 
 
 
@@ -624,19 +624,17 @@ Go包的初始化次序，三点：
 - 每个包内按以“常量 -> 变量 -> init函数”的顺序进行初始化；
 - 包内的多个init函数按出现次序进行自动调用。
 
-
-
 ### init函数的用途
 
 Go包初始化时，init函数的初始化次序在变量之后，这给了开发人员在init函数中**对包级变量进行进一步检查与操作**的机会。
 
 #### 用途1：重置包级变量值
 
-负责对包内部以及暴露到外部的包级数据（主要是包级变量）的初始状态进行检查。
+负责对包内部以及暴露到外部的包级数据（主要是包级变量）的**初始状态进行检查**。
 
 例如，标准库flag包：🔖
 
-flag包定义了一个导出的包级变量CommandLine，如果用户没有通过flag.NewFlagSet创建新的代表命令行标志集合的实例，那么CommandLine就会作为flag包各种导出函数背后，默认的代表命令行标志集合的实例。
+flag包定义了一个导出的包级变量`CommandLine`，如果用户没有通过flag.NewFlagSet创建新的代表命令行标志集合的实例，那么CommandLine就会作为flag包各种导出函数背后，默认的代表命令行标志集合的实例。
 
 ```go
 var CommandLine = NewFlagSet(os.Args[0], ExitOnError)
@@ -683,7 +681,7 @@ var Usage = func() {
 
 #### 用途2：实现对包级变量的复杂初始化
 
-些包级变量需要一个比较复杂的初始化过程，有些时候，使用它的**类型零值**（每个Go类型都具有一个零值定义）或通过简单初始化表达式不能满足业务逻辑要求，而init函数则非常适合完成此项工作，标准库http包中就有这样一个典型示例：
+有些包级变量需要一个比较复杂的初始化过程，有些时候，使用它的**类型零值**（每个Go类型都具有一个零值定义）或通过简单初始化表达式不能满足业务逻辑要求，而init函数则非常适合完成此项工作，标准库http包中就有这样一个典型示例：
 
 ```go
 // net/http/h2_bundle.go
@@ -709,7 +707,7 @@ func init() {
 
 http包定义了一系列布尔类型的特性开关变量，可以通过GODEBUG环境变量的值，开启相关特性开关。
 
-#### 用途3：在init函数中实现“注册模式”
+#### 用途3：在init函数中实现“注册模式” 🔖
 
 lib/pq包访问PostgreSQL数据库的代码示例：
 
@@ -745,7 +743,7 @@ init函数中，pq包将自己实现的sql驱动注册到了sql包中。这样�
 
 实际上，这种**通过在init函数中注册自己的实现的模式，就有效降低了Go包对外的直接暴露，尤其是包级变量的暴露**，从而避免了外部通过包级变量对包状态的改动。
 
-另外，从标准库database/sql包的角度来看，这种“注册模式”实质是一种**工厂设计模式**的实现，sql.Open函数就是这个模式中的工厂方法，它根据外部传入的驱动名称“生产”出不同类别的数据库实例句柄。
+另外，从标准库database/sql包的角度来看，这种“注册模式”实质是一种**工厂设计模式**的实现，sql.Open函数就是这个模式中的工厂方法，它根据外部传入的驱动名称“生产”出不同类别的数据库实例句柄。🔖
 
 这种“注册模式”在标准库的其他包中也有广泛应用，比如说，使用标准库image包获取各种格式图片的宽和高：
 
@@ -753,35 +751,34 @@ init函数中，pq包将自己实现的sql驱动注册到了sql包中。这样�
 package main
 
 import (
-    "fmt"
-    "image"
-    _ "image/gif" // 以空导入方式注入gif图片格式驱动
-    _ "image/jpeg" // 以空导入方式注入jpeg图片格式驱动
-    _ "image/png" // 以空导入方式注入png图片格式驱动
-    "os"
+	"fmt"
+	"image"
+	_ "image/gif"  // 以空导入方式注入gif图片格式驱动
+	_ "image/jpeg" // 以空导入方式注入jpeg图片格式驱动
+	_ "image/png"  // 以空导入方式注入png图片格式驱动
+	"os"
 )
 
 func main() {
-    // 支持png, jpeg, gif
-    width, height, err := imageSize(os.Args[1]) // 获取传入的图片文件的宽与高
-    if err != nil {
-        fmt.Println("get image size error:", err)
-        return
-    }
-    fmt.Printf("image size: [%d, %d]\n", width, height)
+	width, height, err := imageSize(os.Args[1])
+	if err != nil {
+		fmt.Println("获取图片大小错误：", err)
+		return
+	}
+	fmt.Printf("图片大小：[%d, %d]\n", width, height)
 }
 
 func imageSize(imageFile string) (int, int, error) {
-    f, _ := os.Open(imageFile) // 打开图文文件
-    defer f.Close()
+	f, _ := os.Open(imageFile) // 打开图文文件
+	defer f.Close()
 
-    img, _, err := image.Decode(f) // 对文件进行解码，得到图片实例
-    if err != nil {
-        return 0, 0, err
-    }
+	img, _, err := image.Decode(f) // 对文件进行解码，得到图片实例
+	if err != nil {
+		return 0, 0, err
+	}
 
-    b := img.Bounds() // 返回图片区域
-    return b.Max.X, b.Max.Y, nil
+	b := img.Bounds() // 返回图片区域
+	return b.Max.X, b.Max.Y, nil
 }
 ```
 
@@ -804,15 +801,26 @@ func init() {
 }  
 ```
 
+```sh
+$ go run main.go go.png
+图片大小：[276, 348]
+```
+
 
 
 ### 思考题
 
 > 当init函数在检查包数据初始状态时遇到失败或错误的情况，我们该如何处理呢？
 
-## 09 即学即练：构建一个Web服务就是这么简单
+## 9 即学即练：构建一个Web服务就是这么简单
 
 ### 最简单的HTTP服务
+
+[Go Developer Survey 2024 H1 Results](https://go.dev/blog/survey2024-h1-results) Go应用最广泛的领域调查结果图
+
+![](images/image-20240708111713853.png)
+
+两个web服务相关，API/RPC服务和Web服务（返回html页面）。
 
 ```go
 package main
@@ -827,9 +835,9 @@ func main() {
 }
 ```
 
-ListenAndServe
+`ListenAndServe`
 
-HandleFunc
+`HandleFunc`
 
 第二个参数r代表来自客户端的HTTP请求，第一个参数w则是用来操作返回给客户端的应答的，基于http包实现的HTTP服务的处理函数都要符合这一原型。
 
@@ -1074,6 +1082,10 @@ $ curl -X GET -H "Content-Type:application/json" localhost:8080/book/978-7-111-5
 ```
 
 
+
+### 思考题 🔖
+
+> 基于nosql数据库，怎么实现一个新store.Store接口的实现？
 
 
 

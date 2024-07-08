@@ -2,20 +2,19 @@ package main
 
 import (
 	"fmt"
+	_ "github.com/andyron/prog-init-order/pkg1"
+	_ "github.com/andyron/prog-init-order/pkg2"
+)
 
-	_ "github.com/andyorn/prog-init-order/pkg2"
-	//_ "github.com/andyron/prog-init-order/pkg1"
+const (
+	c1 = "c1"
+	c2 = "c2"
 )
 
 var (
 	_  = constInitCheck()
 	v1 = variableInit("v1")
 	v2 = variableInit("v2")
-)
-
-const (
-	c1 = "c1"
-	c2 = "c2"
 )
 
 func constInitCheck() string {

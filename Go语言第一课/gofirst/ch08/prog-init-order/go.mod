@@ -1,3 +1,3 @@
-module github.com/andyorn/prog-init-order
+module github.com/andyron/prog-init-order
 
 go 1.22.1

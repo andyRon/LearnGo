@@ -2,13 +2,13 @@ package pkg3
 
 import "fmt"
 
+const (
+	c = "c"
+)
+
 var (
 	_ = constInitCheck()
 	v = variableInit("v")
-)
-
-const (
-	c = "c"
 )
 
 func constInitCheck() string {
