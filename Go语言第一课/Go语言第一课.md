@@ -3380,8 +3380,6 @@ type errorString struct {
 func (e *errorString) Error() string {
     return e.s
 }
-
-    
 ```
 
 
@@ -3399,13 +3397,33 @@ type OpError struct {
 }
 ```
 
+这样，错误处理者就可以根据这个类型的错误值提供的**额外上下文信息**，比如Op、Net、Source等，做出错误处理路径的选择，比如下面标准库中的代码：
 
+```go
+// $GOROOT/src/net/http/server.go
+func isCommonNetReadError(err error) bool {
+    if err == io.EOF {
+        return true
+    }
+    if neterr, ok := err.(net.Error); ok && neterr.Timeout() {
+        return true
+    }
+    if oe, ok := err.(*net.OpError); ok && oe.Op == "read" {
+        return true
+    }
+    return false
+}
+```
+
+这段代码利用==类型断言（Type Assertion）==，判断error类型变量err的**动态类型**是否为`*net.OpError`或 `net.Error`。如果err的动态类型是 `*net.OpError`，那么类型断言就会返回这个动态类型的值（存储在oe中），代码就可以通过判断它的Op字段是否为"read"来判断它是否为CommonNetRead类型的错误。
 
 使用error类型，而不是传统意义上的整型或其他类型作为错误类型，三点好处：
 
 - 第一点：统一了错误类型。
-- 第二点：错误是值。
+- 第二点：错误是值。 可以像整型值那样对错误做“==”和“!=”的逻辑比较。
 - 第三点：易扩展，支持自定义错误上下文。
+
+error接口是错误值的提供者与错误值的检视者之间的**契约**。error接口的实现者负责提供**错误上下文**，供负责错误处理的代码使用。这种**错误具体上下文与作为错误值类型的error接口类型的解耦**，也体现了Go组合设计哲学中“==正交==”的理念。
 
 
 
@@ -3413,57 +3431,416 @@ Go语言的几种错误处理的惯用策略，学习这些策略将有助于我
 
 ### 策略一：透明错误处理策略
 
+简单来说，Go语言中的错误处理，就是**根据函数/方法返回的error类型变量中携带的错误值信息做决策，并选择后续代码执行路径的过程**。
 
+最简单的错误策略莫过于**完全不关心返回错误值携带的具体上下文信息**，只要发生错误就进入唯一的错误处理执行路径：
 
-### 策略二：“哨兵”错误处理策略
+```go
+err := doSomething()
+if err != nil {
+    // 不关心err变量底层错误值所携带的具体上下文信息
+    // 执行简单错误处理逻辑并返回
+    ... ...
+    return err
+}
+```
 
+这也是Go语言中**最常见的错误处理策略**，80%以上的Go错误处理情形都可以归类到这种策略下。
 
+此种情况，错误值的构造方（如上面的函数doSomething）可以直接使用Go标准库提供的两个基本错误值构造方法errors.New和fmt.Errorf来构造错误值：
+
+```go
+func doSomething(...) error {
+    ... ...
+    return errors.New("some error occurred")
+}
+```
+
+这样构造出的错误值代表的上下文信息，对错误处理方是透明的，因此这种策略称为“**透明错误处理策略**”。
+
+### 策略二：“哨兵”错误处理策略 🔖
+
+当错误处理方不能只根据“透明的错误值”就做出错误处理路径选取的情况下，错误处理方会尝试对返回的错误值进行检视，于是就有可能出现下面代码中的**反模式**：
+
+```go
+data, err := b.Peek(1)
+if err != nil {
+    switch err.Error() {
+    case "bufio: negative count":
+        // ... ...
+        return
+    case "bufio: buffer full":
+        // ... ...
+        return
+    case "bufio: invalid use of UnreadByte":
+        // ... ...
+        return
+    default:
+        // ... ...
+        return
+    }
+}
+```
+
+简单来说，反模式就是，**错误处理方以透明错误值所能提供的唯一上下文信息（描述错误的字符串），作为错误处理路径选择的依据**。
+
+但这种“反模式”会造成严重的**隐式耦合**。这也就意味着，错误值构造方不经意间的一次错误描述字符串的改动，都会造成错误处理方处理行为的变化，并且这种通过字符串比较的方式，对错误值进行检视的性能也很差。
+
+那这有什么办法吗？
+
+Go标准库采用了定义导出的（Exported）“哨兵”错误值的方式，来辅助错误处理方检视（inspect）错误值并做出错误处理分支的决策，比如下面的bufio包中定义的“哨兵错误”：
+
+```go
+// $GOROOT/src/bufio/bufio.go
+var (
+    ErrInvalidUnreadByte = errors.New("bufio: invalid use of UnreadByte")
+    ErrInvalidUnreadRune = errors.New("bufio: invalid use of UnreadRune")
+    ErrBufferFull        = errors.New("bufio: buffer full")
+    ErrNegativeCount     = errors.New("bufio: negative count")
+)
+```
+
+```go
+data, err := b.Peek(1)
+if err != nil {
+    switch err {
+    case bufio.ErrNegativeCount:
+        // ... ...
+        return
+    case bufio.ErrBufferFull:
+        // ... ...
+        return
+    case bufio.ErrInvalidUnreadByte:
+        // ... ...
+        return
+    default:
+        // ... ...
+        return
+    }
+}
+```
+
+一般“哨兵”错误值变量以ErrXXX格式命名。和透明错误策略相比，“哨兵”策略让错误处理方在有检视错误值的需求时候，可以“有的放矢”。
+
+不过，对于API的开发者而言，暴露“哨兵”错误值也意味着这些**错误值和包的公共函数/方法一起成为了API的一部分**。一旦发布出去，开发者就要对它进行很好的维护。而“哨兵”错误值也让使用这些值的错误处理方对它产生了依赖。
+
+从Go 1.13版本开始，标准库errors包提供了`Is`函数用于错误处理方对错误值的检视。Is函数类似于把一个error类型变量与“哨兵”错误值进行比较:
+
+```go
+// 类似 if err == ErrOutOfBounds{ … }
+if errors.Is(err, ErrOutOfBounds) {
+    // 越界的错误处理
+} 
+```
+
+不同的是，如果error类型变量的底层错误值是一个**包装错误（Wrapped Error）**，errors.Is方法会沿着该包装错误所在**错误链（Error Chain)**，与链上所有被包装的错误（Wrapped Error）进行比较，直至找到一个匹配的错误为止。
+
+```go
+var ErrSentinel = errors.New("the underlying sentinel error")
+
+func main() {
+	err1 := fmt.Errorf("wrap sentinel: %w", ErrSentinel)
+	err2 := fmt.Errorf("wrap err1: %w", err1)
+  println(err2 == ErrSentinel) //false
+	if errors.Is(err2, ErrSentinel) {
+		println("err2 is ErrSentinel")
+		return
+	}
+
+	println("err2 is not ErrSentinel")
+}
+```
+
+这里通过fmt.Errorf函数，并且使用%w创建包装错误变量err1和err2，其中err1实现了对ErrSentinel这个“哨兵错误值”的包装，而err2又对err1进行了包装，这样就形成了一条错误链。位于错误链最上层的是err2，位于最底层的是ErrSentinel。之后，再分别通过值比较和errors.Is这两种方法，判断err2与ErrSentinel的关系。
 
 ### 策略三：错误值类型检视策略
+
+如果遇到错误处理方需要错误值提供更多的“错误上下文”的情况，那么就通过**自定义错误类型的构造错误值**的方式来实现。
+
+由于错误值都通过error接口变量统一呈现，要得到底层错误类型携带的错误上下文信息，错误处理方需要使用Go提供的==类型断言机制（Type Assertion）==或==类型选择机制（Type Switch）==，这种错误处理方式，可称之为**错误值类型检视策略**。
+
+```go
+// $GOROOT/src/encoding/json/decode.go
+type UnmarshalTypeError struct {
+    Value  string       
+    Type   reflect.Type 
+    Offset int64        
+    Struct string       
+    Field  string      
+}
+
+func (d *decodeState) addErrorContext(err error) error {
+    if d.errorContext.Struct != nil || len(d.errorContext.FieldStack) > 0 {
+        switch err := err.(type) {
+        case *UnmarshalTypeError:
+            err.Struct = d.errorContext.Struct.Name()
+            err.Field = strings.Join(d.errorContext.FieldStack, ".")
+            return err
+        }
+    }
+    return err
+} 
+```
+
+这段代码通过类型switch语句得到了err变量代表的动态类型和值，然后在匹配的case分支中利用错误上下文信息进行处理。
+
+从Go 1.13版本开始，标准库errors包提供了`As`函数给错误处理方检视错误值。As函数类似于通过类型断言判断一个error类型变量是否为特定的自定义错误类型:
+
+```go
+// 类似 if e, ok := err.(*MyError); ok { … }
+var e *MyError
+if errors.As(err, &e) {
+    // 如果err类型为*MyError，变量e将被设置为对应的错误值
+}
+```
+
+不同的是，如果error类型变量的动态错误值是一个包装错误，errors.As函数会沿着该包装错误所在错误链，与链上所有被包装的错误的类型进行比较，直至找到一个匹配的错误类型，就像errors.Is函数那样。
+
+```go
+type MyError struct {
+    e string
+}
+
+func (e *MyError) Error() string {
+    return e.e
+}
+
+func main() {
+    var err = &MyError{"MyError error demo"}
+    err1 := fmt.Errorf("wrap err: %w", err)
+    err2 := fmt.Errorf("wrap err1: %w", err1)
+    var e *MyError
+    if errors.As(err2, &e) {
+        println("MyError is on the chain of err2")
+        println(e == err)                  
+        return                             
+    }                                      
+    println("MyError is not on the chain of err2")
+} 
+```
 
 
 
 ### 策略四：错误行为特征检视策略
 
+除了第一种策略有效降低了错误的构造方与错误处理方两者之间的耦合。其它两种策略依然在错误的构造方与错误处理方两者之间建立了耦合。
 
+错误行为特征检视策略：**将某个包中的错误类型归类，统一提取出一些公共的错误行为特征，并将这些错误行为特征放入一个公开的接口类型中**。
+
+以标准库中的net包为例，它将包内的所有错误类型的公共行为特征抽象并放入net.Error这个接口中：
+
+```go
+// $GOROOT/src/net/net.go
+type Error interface {
+    error
+    Timeout() bool  
+    Temporary() bool
+}
+```
+
+net.Error接口包含两个用于判断错误行为特征的方法：Timeout用来判断是否是超时（Timeout）错误，Temporary用于判断是否是临时（Temporary）错误。
+
+而错误处理方只需要依赖这个公共接口，就可以检视具体错误值的错误行为特征信息，并根据这些信息做出后续错误处理分支选择的决策。
+
+```go
+// $GOROOT/src/net/http/server.go
+func (srv *Server) Serve(l net.Listener) error {
+    ... ...
+    for {
+        rw, e := l.Accept()
+        if e != nil {
+            select {
+            case <-srv.getDoneChan():
+                return ErrServerClosed
+            default:
+            }
+            if ne, ok := e.(net.Error); ok && ne.Temporary() {
+                // 注：这里对临时性(temporary)错误进行处理
+                ... ...
+                time.Sleep(tempDelay)
+                continue
+            }
+            return e
+        }
+        ...
+    }
+    ... ...
+}
+```
+
+Accept方法实际上返回的错误类型为*OpError，它是net包中的一个自定义错误类型，它实现了错误公共特征接口net.Error:
+
+```go
+// $GOROOT/src/net/net.go
+type OpError struct {
+    ... ...
+    // Err is the error that occurred during the operation.
+    Err error
+}
+
+type temporary interface {
+    Temporary() bool
+}
+
+func (e *OpError) Temporary() bool {
+  if ne, ok := e.Err.(*os.SyscallError); ok {
+      t, ok := ne.Err.(temporary)
+      return ok && t.Temporary()
+  }
+  t, ok := e.Err.(temporary)
+  return ok && t.Temporary()
+}
+```
+
+
+
+
+
+错误处理策略选择上的建议：
+
+- 请尽量使用“透明错误”处理策略，降低错误处理方与错误值构造方之间的耦合；
+- 如果可以通过错误值类型的特征进行错误检视，那么请尽量使用“错误行为特征检视策略”;
+- 在上述两种策略无法实施的情况下，再使用“哨兵”策略和“错误值类型检视”策略；
+- Go 1.13及后续版本中，尽量用errors.Is和errors.As函数替换原先的错误检视比较语句。
 
 
 
 ## 23 函数：怎么让函数更简洁健壮？
 
-### 健壮性的“三不要”原则
+健壮的函数意味着，**无论调用者如何使用你的函数，它都能以合理的方式处理调用者的任何输入，并给调用者返回预设的、清晰的错误值**。即便你的函数发生内部异常，函数也会尽力从异常中恢复，尽可能地不让异常蔓延到整个程序。
+
+而简洁优雅，则意味着函数的实现易读、易理解、更易维护，同时简洁也意味着统计意义上的更少的bug。
+
+### 23.1 健壮性的“三不要”原则
 
 - 原则一：不要相信任何外部输入的参数。
 - 原则二：不要忽略任何一个错误。
+
+对应函数实现中，对标准库或第三方包提供的函数或方法调用，不能假定它一定会成功，**一定要显式地检查这些调用返回的错误值**。一旦发现错误，要及时终止函数执行，防止错误继续传播。
+
 - 原则三：不要假定异常不会发生。
 
-### 认识Go语言中的异常：panic
+**异常不是错误**。错误是可预期的，也是经常会发生的，我们有对应的公开错误码和错误处理预案，但异常却是少见的、意料之外的。通常意义上的异常，指的是硬件异常、操作系统异常、语言运行时异常，还有更大可能是代码中潜在bug导致的异常，比如代码中出现了以0作为分母，或者是数组越界访问等情况。
+
+
+
+### 23.2 认识Go语言中的异常：panic
 
 在Go中，panic主要有两类来源，一类是来自**Go运行时**，另一类则是**Go开发人员通过panic函数主动触发的**。
 
-无论是哪种，一旦panic被触发，后续Go程序的执行过程都是一样的，这个过程被Go语言称为**panicking**。
+无论是哪种，一旦panic被触发，后续Go程序的执行过程都是一样的，这个过程被Go语言称为**==panicking==**。
+
+当函数F调用panic函数时，函数F的执行将停止。不过，函数F中已进行求值的deferred函数都会得到正常执行，执行完这些deferred函数后，函数F才会把控制权返还给其调用者。
+
+对于函数F的调用者而言，函数F之后的行为就如同调用者调用的函数是panic一样，该panicking过程将继续在栈上进行下去，直到当前Goroutine中的所有函数都返回为止，然后Go程序将崩溃退出。
+
+```go
+func foo() {
+	println("call foo")
+	bar()
+	println("exit foo")
+}
+
+func bar() {
+	println("call bar")
+	panic("panic occurs in bar")  // 调用panic函数手动触发了panic
+	zoo()
+	println("exit bar")
+}
+
+func zoo() {
+	println("call zoo")
+	println("exit zoo")
+}
+
+func main() {
+	println("call main")
+	foo()
+	println("exit main")
+}
+```
+
+函数的调用次序依次为main -> foo ->bar -> zoo。在bar函数中，调用panic函数手动触发了panic。结果为：
+
+```
+call main
+call foo
+call bar
+panic: panic occurs in bar
+```
+
+panicking过程:
+
+- 程序从入口函数main开始依次调用了foo、bar函数，在bar函数中，代码在调用zoo函数之前调用了panic函数触发了异常。那示例的panicking过程就从这开始了。bar函数调用panic函数之后，它自身的执行就此停止了，所以我们也没有看到代码继续进入zoo函数执行。并且，bar函数没有捕捉这个panic，这样这个panic就会沿着函数调用栈向上走，来到了bar函数的调用者foo函数中。
+- 从foo函数的视角来看，**这就好比将它对bar函数的调用，换成了对panic函数的调用一样**。这样一来，foo函数的执行也被停止了。由于foo函数也没有捕捉panic，于是panic继续沿着函数调用栈向上走，来到了foo函数的调用者main函数中。
+- 同理，从main函数的视角来看，这就好比将它对foo函数的调用，换成了对panic函数的调用一样。结果就是，main函数的执行也被终止了，于是整个程序异常退出，日志"exit main"也没有得到输出的机会。
 
 
 
-### 如何应对panic？
+可以通过`recover`函数来实现捕捉panic并恢复程序正常执行秩序:
 
-- 第一点：评估程序对panic的忍受度
-- 第二点：提示潜在bug
-- 第三点：不要混淆异常与错误
+```go
+func bar() {
+    defer func() {
+        if e := recover(); e != nil {
+            fmt.Println("recover the panic:", e)
+        }
+    }()
+
+    println("call bar")
+    panic("panic occurs in bar")
+    zoo()
+    println("exit bar")
+}
+
+    
+```
 
 
 
-### 使用defer简化函数实现
+### 23.3 如何应对panic？
+
+#### 第一点：评估程序对panic的忍受度
+
+**不同应用对异常引起的程序崩溃退出的忍受度是不一样的。**
+
+比如，一个单次运行于控制台窗口中的命令行交互类程序（CLI），和一个常驻内存的后端HTTP服务器程序，对异常崩溃的忍受度就是不同的。
+
+前者即便因异常崩溃，对用户来说也仅仅是再重新运行一次而已。但后者一旦崩溃，就很可能导致整个网站停止服务。
+
+所以，**针对各种应用对panic忍受度的差异，采取的应对panic的策略也应该有不同**。
+
+🔖
+
+#### 第二点：提示潜在bug
+
+🔖
+
+在Go标准库中，**大多数panic的使用都是充当类似断言的作用的**。
+
+#### 第三点：不要混淆异常与错误
+
+
+
+### 23.4 使用defer简化函数实现
 
 Go语言引入defer的初衷，就是解决这些问题。那么，defer具体是怎么解决这些问题的呢？或者说，defer具体的运作机制是怎样的呢？
 
+![](images/image-20240710100648693.png)
+
+### 23.5 defer使用的几个注意事项
+
+defer不仅可以用来**捕捉和恢复panic**，还能让函数变得**更简洁和健壮**。
+
+#### 第一点：明确哪些函数可以作为deferred函数
 
 
-### defer使用的几个注意事项
 
-- 第一点：明确哪些函数可以作为deferred函数
-- 第二点：注意defer关键字后面表达式的求值时机
-- 第三点：知晓defer带来的性能损耗
+#### 第二点：注意defer关键字后面表达式的求值时机
+
+
+
+#### 第三点：知晓defer带来的性能损耗
 
 
 
@@ -3473,7 +3850,11 @@ Go语言引入defer的初衷，就是解决这些问题。那么，defer具体�
 
 ## 24 方法：理解“方法”的本质
 
+函数是Go代码中的基本功能逻辑单元，它承载了**Go程序的所有执行逻**辑。可以说，Go程序的执行流本质上就是**在函数调用栈中上下流动，从一个函数到另一个函数**。
+
 ### 认识Go方法
+
+Go引入方法这一元素，并不是要支持面向对象编程范式，而是Go践行组合设计哲学的一种实现层面的需要。
 
 ![](images/image-20240704132750133.png)
 
@@ -3481,13 +3862,70 @@ Go语言引入defer的初衷，就是解决这些问题。那么，defer具体�
 
 Go中的方法必须是归属于一个类型的，而receiver参数的类型就是这个方法归属的类型，或者说这个方法就是这个类型的一个方法。
 
+方法的一般声明形式：
+
+```go
+func (t *T或T) MethodName(参数列表) (返回值列表) {
+    // 方法体
+}
+```
+
+无论receiver参数的类型为`*T`还是T，都把一般声明形式中的T叫做receiver参数t的==基类型==。
+
+如果t的类型为T，那么说这个方法是类型`T`的一个方法；如果t的类型为`*T`，那么就说这个方法是类型`*T`的一个方法。
+
+每个方法只能有一个receiver参数。
+
+> 方法接收器（receiver）参数、函数/方法参数，以及返回值变量对应的作用域范围，都是函数/方法体对应的显式代码块。
+
+这就意味着，receiver部分的参数名不能与方法参数列表中的形参名，以及具名返回值中的变量名存在冲突，必须在这个方法的作用域中具有唯一性。
+
+如果在方法体中，没有用到receiver参数，也可以省略receiver的参数名。
+
+**receiver参数的基类型本身不能为指针类型或接口类型。**
+
+```go
+type MyInt *int
+func (r MyInt) String() string { // r的基类型为MyInt，编译器报错：invalid receiver type MyInt (MyInt is a pointer type)
+    return fmt.Sprintf("%d", *(*int)(r))
+}
+
+type MyReader io.Reader
+func (r MyReader) Read(p []byte) (int, error) { // r的基类型为MyReader，编译器报错：invalid receiver type MyReader (MyReader is an interface type)
+    return r.Read(p)
+}
+
+    
+```
 
 
 
+Go要求，**方法声明(的位置)要与receiver参数的基类型声明放在同一个包内**。基于这个约束可以得到两个推论：
 
-### 方法的本质是什么？
+1. 不能为原生类型（诸如int、float64、map等）添加方法。
 
-Go语言中的方法的本质就是，一个以方法的receiver参数作为第一个参数的普通函数。
+```go
+func (i int) Foo() string { // 编译器报错：cannot define new methods on non-local type int
+    return fmt.Sprintf("%d", i) 
+}
+```
+
+2. 不能跨越Go包为其他包的类型声明新方法。
+
+```go
+import "net/http"
+
+func (s http.Server) Foo() { // 编译器报错：cannot define new methods on non-local type http.Server
+} 
+```
+
+
+
+🔖
+
+### 方法的本质是什么？🔖
+
+Go语言中的方法的本质就是，**一个以方法的receiver参数作为第一个参数的普通函数**。
 
 
 
@@ -3497,31 +3935,29 @@ Go语言中的方法的本质就是，一个以方法的receiver参数作为第�
 
 
 
-
-
-## 25 方法：方法集合与如何选择receiver类型？
+## 25 方法：方法集合与如何选择receiver类型？🔖
 
 由于在Go语言中，**方法本质上就是函数**，所以之前关于函数设计的内容对方法也同样适用，比如错误处理设计、针对异常的处理策略、使用defer提升简洁性，等等。
 
-### receiver参数类型对Go方法的影响
+### 25.1 receiver参数类型对Go方法的影响
 
 
 
-### 选择receiver参数类型的第一个原则
+### 25.1 选择receiver参数类型的第一个原则
 
-如果Go方法要把对receiver参数代表的类型实例的修改，反映到原类型实例上，那么我们应该选择*T作为receiver参数的类型。
-
-
-
-### 选择receiver参数类型的第二个原则
+如果Go方法要把对receiver参数代表的类型实例的修改，反映到原类型实例上，那么应该选择*T作为receiver参数的类型。
 
 
 
-### 方法集合
+### 25.1 选择receiver参数类型的第二个原则
 
 
 
-### 选择receiver参数类型的第三个原则
+### 25.1 方法集合
+
+
+
+### 25.1 选择receiver参数类型的第三个原则
 
 
 
@@ -3531,7 +3967,15 @@ Go语言中的方法的本质就是，一个以方法的receiver参数作为第�
 
 ## 26 方法：如何用类型嵌入模拟实现“继承”？
 
-### 什么是类型嵌入
+==独立的自定义类型==就是这个类型的所有方法都是自己显式实现的。
+
+Go语言不支持经典面向对象的编程范式与语法元素，所以我们这里只是借用了“继承”这个词汇而已，说是“继承”，实则依旧是一种**组合**的思想。
+
+而这种“继承”，我们是通过Go语言的类型嵌入（Type Embedding）来实现的。
+
+
+
+### 26.1 什么是类型嵌入
 
 ==类型嵌入（Type Embedding）==指的就是在一个类型的定义中嵌入了其他类型。Go语言支持两种类型嵌入，分别是==接口类型的类型嵌入==和==结构体类型的类型嵌入==。
 
@@ -3601,14 +4045,14 @@ type S1 struct {
 
 
 
-### 类型嵌入与方法集合
+### 26.2 类型嵌入与方法集合
 
 - 结构体类型中嵌入接口类型
 - 结构体类型中嵌入结构体类型
 
 
 
-### defined类型与alias类型的方法集合
+### 26.3 类型与alias类型的方法集合
 
 Go语言中，凡通过类型声明语法声明的类型都被称为==defined类型==。
 
@@ -3628,27 +4072,82 @@ type NI I // 基于已存在的接口类型I创建新defined接口类型NI
 
 ## 27 即学即练：跟踪函数调用链，理解代码更直观
 
-### 引子
+### 27.1 引子
+
+使用defer可以跟踪函数的执行过程。
+
+```go
+package main
+
+func main() {
+	defer Trace("main")()
+	foo()
+}
+
+func Trace(name string) func() {
+	println("enter: ", name)
+	return func() {
+		println("exit: ", name)
+	}
+}
+
+func foo() {
+	defer Trace("foo")()
+	bar()
+}
+
+func bar() {
+	defer Trace("bar")()
+}
+```
+
+函数调用跟踪：
+
+```
+enter:  main
+enter:  foo
+enter:  bar
+exit:  bar
+exit:  foo
+exit:  main
+```
+
+程序按main -> foo -> bar的函数调用次序执行，代码在函数的入口与出口处分别输出了跟踪日志。
+
+不足之处：
+
+- 调用Trace时需手动显式传入要跟踪的函数名；
+- 如果是并发应用，不同Goroutine中函数链跟踪混在一起无法分辨；
+- 输出的跟踪结果缺少层次感，调用关系不易识别；
+- 对要跟踪的函数，需手动调用Trace函数。
+
+> 目标：**实现一个自动注入跟踪代码，并输出有层次感的函数调用链跟踪命令行工具**。
+
+### 27.2 自动获取所跟踪函数的函数名
 
 
 
-### 自动获取所跟踪函数的函数名
+### 27.3 增加Goroutine标识 🔖
 
 
 
-### 增加Goroutine标识
+### 27.4 让输出的跟踪信息更具层次感 🔖
+
+对于程序员来说，缩进是最能体现出“层次感”的方法。
 
 
 
-### 让输出的跟踪信息更具层次感
+### 27.5 利用代码生成自动注入Trace函数 🔖
+
+#### 将Trace函数放入一个独立的module中
 
 
 
-### 利用代码生成自动注入Trace函数
+#### 自动注入Trace函数
 
-- 将Trace函数放入一个独立的module中
-- 自动注入Trace函数
-- 利用instrument工具注入跟踪代码
+
+
+#### 利用instrument工具注入跟踪代码
 
 
 
@@ -3658,37 +4157,253 @@ type NI I // 基于已存在的接口类型I创建新defined接口类型NI
 
 # 核心篇：“脑勤+”洞彻核心
 
-## 28 接口：接口即契约
+核心篇主要涵盖**接口类型语法与Go原生提供的三个并发原语（Goroutine、channel与select）**，之所以将它们放在核心语法的位置，是因为它们不仅代表了Go语言在**编程语言领域的创新**，更是影响Go**==应用骨架==（Application Skeleton）**设计的重要元素。
 
-### 认识接口类型
+所谓应用骨架，就是指将应用代码中的**业务逻辑、算法实现逻辑、错误处理逻辑**等“皮肉”逐一揭去后所呈现出的应用结构。
+
+![](images/image-20240711195856322.png)
+
+从静态角度去看，我们能清晰地看到应用程序的组成部分以及各个部分之间的连接；从动态角度去看，我们能看到这幅骨架上可独立运动的几大机构。
+
+前者我们可以将其理解为Go应用内部的耦合设计，而后者我们可以理解为应用的并发设计。
+
+## 28 接口：接口即契约 ❤️ 
+
+### 28.1 认识接口类型
+
+**==接口类型==是由type和interface关键字定义的一组方法集合**，其中，方法集合唯一确定了这个接口类型所表示的接口。
+
+```go
+type MyInterface interface {
+    M1(int) error
+    M2(io.Writer, ...string)
+}
+```
+
+接口类型MyInterface所表示的接口的方法集合，包含两个方法M1和M2。之所以称M1和M2为“方法”，更多是**从这个接口的实现者的角度考虑的**。但从上面接口类型声明中各个“方法”的形式上来看，这更像是**不带有func关键字的函数名+函数签名（参数列表+返回值列表）**的组合。
+
+并且，接口类型的方法集合中声明的方法，它的**参数列表和返回值列表都不需要写出形参名字**。也就是说，**方法的参数列表中形参名字与返回值列表中的具名返回值，都不作为区分两个方法的凭据**。比如，下面两个等价：
+
+```go
+type MyInterface interface {
+    M1(a int) error
+    M2(w io.Writer, strs ...string)
+}
+
+type MyInterface interface {
+    M1(n int) error
+    M2(w io.Writer, args ...string)
+} 
+```
 
 
 
-### 尽量定义“小接口”
+不过，Go语言要求接口类型声明中的**方法必须是具名的**，并且方法名字在这个接口类型的方法集合中是**唯一**的。
+
+Go接口类型允许嵌入的不同接口类型的方法集合存在**交集**，但前提是交集中的方法不仅名字要一样，它的函数签名部分也要保持一致，也就是参数列表与返回值列表也要相同，否则Go编译器照样会报错。
+
+```go
+type Interface1 interface {
+    M1()
+}
+type Interface2 interface {
+    M1(string) 
+    M2()
+}
+
+type Interface3 interface{
+    Interface1
+    Interface2 // 编译器报错：duplicate method M1
+    M3()
+}
+```
+
+
+
+在Go接口类型的方法集合中放入首字母小写的**非导出方法**也是合法的。
+
+```go
+// $GOROOT/src/context.go
+
+// A canceler is a context type that can be canceled directly. The
+// implementations are *cancelCtx and *timerCtx.
+type canceler interface {
+    cancel(removeFromParent bool, err error)
+    Done() <-chan struct{}
+}
+```
+
+如果接口类型的方法集合中包含非导出方法，那么这个接口类型自身通常也是非导出的，它的应用范围也仅局限于包内。【很少会用这种带有非导出方法的接口类型】
+
+==空接口类型== `interface{}`
+
+
+
+接口类型一旦被定义后，它就和其他Go类型一样可以用于声明变量:
+
+```go
+var err error   // err是一个error接口类型的实例变量
+var r io.Reader // r是一个io.Reader接口类型的实例变量 
+```
+
+这些类型为接口类型的变量被称为**==接口类型变量==**，如果没有被显式赋予初值，接口类型变量的默认值为nil。如果要为接口类型变量显式赋予初值，我们就要为接口类型变量选择合法的右值。
+
+Go规定：**如果一个类型T的方法集合是某接口类型I的方法集合的等价集合或超集，我们就说类型T实现了接口类型I，那么类型T的变量就可以作为合法的右值赋值给接口类型I的变量。**
+
+可以将任何类型的值作为右值，赋值给空接口类型的变量。
+
+```go
+var i interface{} = 15 // ok
+i = "hello, golang" // ok
+type T struct{}
+var t T
+i = t  // ok
+i = &t // ok
+```
+
+空接口类型的这一可接受任意类型变量值作为右值的特性，让他成为Go加入泛型语法之前**唯一一种具有“泛型”能力的语法元素**。
+
+Go语言还支持接口类型变量赋值的“**逆操作**”，也就是通过接口类型变量“还原”它的右值的类型与值信息，这个过程被称为“**==类型断言==（Type Assertion）**”：
+
+```go
+v, ok := i.(T) 
+```
+
+其中i是某一个接口类型变量，如果T是一个非接口类型且T是想要还原的类型，那么这句代码的含义就是**断言存储在接口类型变量i中的值的类型为T**。
+
+如果接口类型变量i之前被赋予的值确为T类型的值，那么这个语句执行后，左侧“comma, ok”语句中的变量ok的值将为true，变量v的类型为T，它值会是之前变量i的右值。如果i之前被赋予的值不是T类型的值，那么这个语句执行后，变量ok的值为false，变量v的类型还是那个要还原的类型，但它的值是类型T的零值。
+
+```go
+var a int64 = 13
+var i interface{} = a
+v1, ok := i.(int64) 
+fmt.Printf("v1=%d, the type of v1 is %T, ok=%t\n", v1, v1, ok) // v1=13, the type of v1 is int64, ok=true
+v2, ok := i.(string)
+fmt.Printf("v2=%s, the type of v2 is %T, ok=%t\n", v2, v2, ok) // v2=, the type of v2 is string, ok=false
+v3 := i.(int64) 
+fmt.Printf("v3=%d, the type of v3 is %T\n", v3, v3) // v3=13, the type of v3 is int64
+v4 := i.([]int) // panic: interface conversion: interface {} is int64, not []int
+fmt.Printf("the type of v4 is %T\n", v4)
+```
+
+如果`v, ok := i.(T)`中的T是一个接口类型，那么类型断言的语义就会变成：**断言i的值实现了接口类型T**。如果断言成功，变量v的类型为i的值的类型，而并非接口类型T。如果断言失败，v的类型信息为接口类型T，它的值为nil。
+
+
+
+```go
+type MyInterface interface {
+    M1()
+}
+
+type T int
+               
+func (T) M1() {
+    println("T's M1")
+}              
+               
+func main() {  
+    var t T    
+    var i interface{} = t
+    v1, ok := i.(MyInterface)
+    if !ok {   
+        panic("the value of i is not MyInterface")
+    }          
+    v1.M1()    
+    fmt.Printf("the type of v1 is %T\n", v1) // the type of v1 is main.T
+               
+    i = int64(13)
+    v2, ok := i.(MyInterface)
+    fmt.Printf("the type of v2 is %T\n", v2) // the type of v2 is <nil>
+    // v2 = 13 //  cannot use 1 (type int) as type MyInterface in assignment: int does not implement MyInterface (missing M1   method) 
+}
+```
+
+🔖
+
+### 28.2 尽量定义“小接口”
 
 - 隐式契约，无需签署，自动生效
+
+Go语言中接口类型与它的实现者之间的关系是**隐式**的，不需要像其他语言（比如Java）那样要求实现者显式放置“implements”进行修饰，实现者只需要实现接口方法集合中的全部方法便算是遵守了契约，并立即生效了。
+
 - 更倾向于“小契约”
 
+Go选择了使用“小契约”，表现在代码上就是尽量定义小接口，即**方法个数在1~3个之间的接口**。
+
+早期版本的Go标准库（Go 1.13版本）、Docker项目（Docker 19.03版本）以及Kubernetes项目（Kubernetes 1.17版本）中定义的接口类型方法集合中方法数量：
+
+![](images/image-20240711203002095.png)
+
+### 28.3 小接口有哪些优势？
+
+#### 第一点：接口越小，抽象程度越高
+
+计算机程序本身就是对真实世界的==抽象与再建构==。抽象就是**对同类事物去除它具体的、次要的方面，抽取它相同的、主要的方面**。不同的抽象程度，会导致抽象出的概念对应的事物的集合不同。**抽象程度越高，对应的集合空间就越大；抽象程度越低，也就是越具像化，更接近事物真实面貌，对应的集合空间越小。**
+
+对生活中不同抽象程度的形象诠释：
+
+![](images/image-20240711203233701.png)
+
+这张图中我们分别建立了三个抽象：
+
+- 会飞的。这个抽象对应的事物集合包括：蝴蝶、蜜蜂、麻雀、天鹅、鸳鸯、海鸥和信天翁；
+- 会游泳的。鸭子、海豚、人类、天鹅、鸳鸯、海鸥和信天翁；
+- 会飞且会游泳的。天鹅、鸳鸯、海鸥和信天翁。
+
+“会飞的”、“会游泳的”这两个抽象对应的事物集合，要大于“会飞且会游泳的”所对应的事物集合空间，也就是说“会飞的”、“会游泳的”这两个抽象程度更高。
+
+```go
+// 会飞的
+type Flyable interface {
+	Fly()
+}
+
+// 会游泳的
+type Swimable interface {
+	Swim()
+}
+
+// 会飞且会游泳的
+type FlySwimable interface {
+	Flyable
+	Swimable
+}
+
+```
+
+![](images/image-20240711203516982.png)
+
+Flyable只有一个Fly方法，FlySwimable则包含两个方法Fly和Swim。我们看到，具有更少方法的Flyable的抽象程度相对于FlySwimable要高，包含的事物集合（7种动物）也要比FlySwimable的事物集合（4种动物）大。也就是说，接口越小（接口方法少)，抽象程度越高，对应的事物集合越大。
+
+#### 第二点：小接口易于实现和测试
 
 
-### 小接口有哪些优势？
 
-- 第一点：接口越小，抽象程度越高
 
-- 第二点：小接口易于实现和测试
-- 第三点：小接口表示的“契约”职责单一，易于复用组合
 
-### 定义小接口，你可以遵循的几点
+#### 第三点：小接口表示的“契约”职责单一，易于复用组合
 
-- 首先，别管接口大小，先抽象出接口。
+Go推崇通过组合的方式构建程序。Go开发人员一般会尝试通过嵌入其他已有接口类型的方式来构建新接口类型，就像通过嵌入io.Reader和io.Writer构建io.ReadWriter那样。
+
+那构建时，如果有众多候选接口类型供我们选择，我们会怎么选择呢？
+
+显然，我们会选择那些**新接口类型需要的契约职责，同时也要求不要引入我们不需要的契约职责**。在这样的情况下，拥有单一或少数方法的小接口便更有可能成为我们的目标，而那些拥有较多方法的大接口，可能会因引入了诸多不需要的契约职责而被放弃。由此可见，小接口更契合Go的组合思想，也更容易发挥出组合的威力。
+
+### 28.4 定义小接口，你可以遵循的几点
+
+- 首先，**别管接口大小，先抽象出接口**。
+
+尽管接口不是Go独有的，但**专注于接口是编写强大而灵活的Go代码的关键**。因此，在定义小接口之前，我们需要先针对==问题领域==进行深入理解，聚焦抽象并发现接口，就像下图所展示的那样，先针对领域对象的行为进行抽象，形成一个接口集合：
 
 ![](images/image-20240704184513581.png)
+
+**初期，我们先不要介意这个接口集合中方法的数量**，因为对问题域的理解是循序渐进的，在第一版代码中直接定义出小接口可能并不现实。而且，标准库中的io.Reader和io.Writer也不是在Go刚诞生时就有的，而是在发现对网络、文件、其他字节数据处理的实现十分相似之后才抽象出来的。并且越偏向业务层，抽象难度就越高，这或许也是前面图中Go标准库小接口（1~3个方法）占比略高于Docker和Kubernetes的原因。
 
 - 第二，将大接口拆分为小接口。
 
 ![](images/image-20240704184559349.png)
 
-- 最后，我们要注意接口的单一契约职责。
+- 最后，我们要注意接口的**单一契约职责**。
 
 
 
