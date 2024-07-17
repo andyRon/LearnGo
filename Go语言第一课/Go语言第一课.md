@@ -5,6 +5,8 @@ Go语言第一课
 
 官方网站：https://golang.google.cn/ or https://go.dev/
 
+发布时间：2021-2022
+
 ## 0 这样入门Go，才能少走弯路
 
 ### 入坑Go的三大理由
@@ -4504,21 +4506,21 @@ go tool compile -S interface_internal.go > interface_internal.s
 
 
 
-## 30 接口：Go中最强大的魔法 🔖
+## 30 接口：Go中最强大的魔法
 
 ### 30.1 一切皆组合
 
-如果C++和Java是关于类型层次结构和类型分类的语言，那么Go则是关于组合的语言。
+如果C++和Java是关于类型**层次**结构和类型**分类**的语言，那么Go则是关于**组合**的语言。
 
 如果把Go应用程序比作是一台机器的话，那么组合关注的就是如何将散落在各个包中的“零件”关联并组装到一起。
 
 正交性
 
-> ==正交（Orthogonality）==是从几何学中借用的术语，说的是如果两条线以直角相交，那么这两条线就是正交的，比如我们在代数课程中经常用到的坐标轴就是这样。用向量术语说，这两条直线互不依赖，沿着某一条直线移动，你投影到另一条直线上的位置不变。
+> ==正交（Orthogonality）==是从几何学中借用的术语，说的是如果两条线以直角相交，那么这两条线就是正交的，比如我们在代数课程中经常用到的坐标轴就是这样。用向量术语说，**这两条直线互不依赖，沿着某一条直线移动，你投影到另一条直线上的位置不变。**
 
 在计算机技术中，正交性用于表示某种**不相依赖性或是解耦性**。如果两个或更多事物中的一个发生变化，不会影响其他事物，那么这些事物就是正交的。比如，在设计良好的系统中，数据库代码与用户界面是正交的：你可以改动界面，而不影响数据库；更换数据库，而不用改动界面。
 
-**编程语言的语法元素间和语言特性也存在着正交的情况，并且通过将这些正交的特性组合起来，我们可以实现更为高级的特性**。在语言设计层面，Go语言就为广大Gopher提供了诸多**正交的语法元素**供后续组合使用，包括：
+**编程语言的语法元素间和语言特性也存在着正交的情况，并且通过将这些正交的特性组合起来，我们可以实现更为高级的特性**。在语言设计层面，Go语言就为广大Gopher提供了诸多**正交的语法元素**供后续组合使用，包括：🔖
 
 - Go语言无类型体系（Type Hierarchy），没有父子类的概念，类型定义是正交独立的；
 - 方法和类型是正交的，每种类型都可以拥有自己的方法集合，方法本质上只是一个将receiver参数作为第一个参数的函数而已；
@@ -4530,6 +4532,8 @@ go tool compile -S interface_internal.go > interface_internal.s
 
 ### 30.2 垂直组合
 
+类型嵌入（Type Embedding）
+
 #### 第一种：通过嵌入接口构建接口
 
 ```go
@@ -4540,8 +4544,6 @@ type ReadWriter interface {
 }
 ```
 
-
-
 #### 第二种：通过嵌入接口构建结构体类型
 
 ```go
@@ -4551,15 +4553,48 @@ type MyReader struct {
 }
 ```
 
-
-
 #### 第三种：通过嵌入结构体类型构建新结构体类型
 
-### 30.3 水平组合
+### 30.3 水平组合 🔖
 
 接口分离原则（ISP原则，Interface Segregation Principle）
 
 
+
+```go
+func Save(f *os.File, data []byte) error
+```
+
+改成：
+
+```go
+func Save(w io.Writer, data []byte) error
+```
+
+io.Writer仅包含一个Write方法，而且这个方法恰恰是Save唯一需要的方法。
+
+以io.Writer接口类型表示数据写入的目的地，既可以支持向磁盘写入，也可以支持向网络存储写入，并支持任何实现了Write方法的写入行为，这让Save函数的**扩展性**得到了质的提升。
+
+对Save函数的测试也将变得十分容易:
+
+```go
+func TestSave(t *testing.T) {
+    b := make([]byte, 0, 128)
+    buf := bytes.NewBuffer(b)
+    data := []byte("hello, golang")
+    err := Save(buf, data)
+    if err != nil {
+        t.Errorf("want nil, actual %s", err.Error())
+    }
+
+    saved := buf.Bytes()
+    if !reflect.DeepEqual(saved, data) {
+        t.Errorf("want %s, actual %s", string(data), string(saved))
+    }
+}
+```
+
+由于bytes.Buffer实现了Write方法，进而实现了io.Writer接口，可以合法地将变量buf传递给Save函数。此后过程中，不需要创建任何磁盘文件或建立任何网络连接。
 
 ### 30.4 接口应用的几种模式
 
@@ -4681,7 +4716,7 @@ func (l *LimitedReader) Read(p []byte) (n int, err error) {
 
 ## 31 并发：Go的并发方案实现方案是怎样的？
 
-### 31.1 什么是并发？
+### 31.1 什么是并发？ 🔖
 
 单进程应用的情况下，用户层应用、操作系统进程以及处理器之间的关系:
 
@@ -4689,17 +4724,30 @@ func (l *LimitedReader) Read(p []byte) (n int, err error) {
 
 
 
-进程应用的情况下，用户层应用、操作系统进程以及处理器之间的关系:
+多进程应用的情况下，用户层应用、操作系统进程以及处理器之间的关系:
 
 ![](images/image-20240711234429579.png)
 
 
 
+粗略看起来，多进程应用与单进程应用相比并没有什么质的提升。那为什么还要将应用设计为多进程呢？
 
 
 
 
-- 粗略看起来，多进程应用与单进程应用相比并没有什么质的提升。那我们为什么还要将应用设计为多进程呢？
+
+线程就是运行于进程上下文中的更轻量级的执行流。
+
+![](images/image-20240717152619145.png)
+
+基于线程的应用通常采用**单进程多线程的模型**，一个应用对应一个进程，应用通过并发设计将自己**划分为多个模块，每个模块由一个线程独立承载执行**。多个线程共享这个进程所拥有的资源，但线程作为执行单元可被独立调度到处理器上运行。
+
+线程的创建、切换与撤销的代价相对于进程是要小得多。当这个应用的多个线程同时被调度到不同的处理器核上执行时，我们就说这个应用是并行的。
+
+> Rob Pike：**并发不是并行，并发关乎结构，并行关乎执行**。
+
+传统支持并发的方式的不足：
+
 - 首先就是复杂。
 - 第二就是难于规模化（scale）。
 
@@ -4711,10 +4759,10 @@ Go并没有使用操作系统线程作为承载分解后的代码片段（模块
 
 相比传统操作系统线程来说，goroutine的优势主要是：
 
-- 资源占用小，每个goroutine的初始栈大小仅为2k；
+- 资源占用小，每个goroutine的**初始栈**大小仅为2k；
 - 由Go运行时而不是操作系统调度，goroutine上下文切换在用户层完成，开销更小；
-- 在语言层面而不是通过标准库提供。goroutine由`go`关键字创建，一退出就会被回收或销毁，开发体验更佳；
-- 语言内置channel作为goroutine间通信原语，为并发设计提供了强大支撑。
+- 在**语言层**面而不是通过标准库提供。goroutine由`go`关键字创建，**一退出就会被回收或销毁**，开发体验更佳；
+- 语言内置`channel`作为goroutine间通信原语，为并发设计提供了强大支撑。
 
 #### goroutine的基本用法
 
@@ -4745,7 +4793,7 @@ go c.serve(connCtx)
 
 #### goroutine间的通信
 
-传统的编程语言（比如：C++、Java、Python等）并非面向并发而生的，所以他们面对并发的逻辑多是基于操作系统的线程。并发的执行单元（线程）之间的通信，利用的也是操作系统提供的线程或进程间通信的原语，比如：共享内存、信号（signal）、管道（pipe）、消息队列、套接字（socket）等。
+传统的编程语言（比如：C++、Java、Python等）并非面向并发而生的，所以他们面对并发的逻辑多是**基于操作系统的线程**。并发的执行单元（线程）之间的通信，利用的也是操作系统提供的线程或进程间通信的原语，比如：共享内存、信号（signal）、管道（pipe）、消息队列、套接字（socket）等。
 
 在这些通信原语中，使用最多、最广泛的（也是最高效的）是结合了线程同步原语（比如：锁以及更为低级的原子操作）的共享内存方式，因此，我们可以说传统语言的并发模型是**基于对内存的共享的**。
 
@@ -4753,9 +4801,9 @@ go c.serve(connCtx)
 
 这种情况下，开发人员承受着巨大的心智负担，并且基于这类传统并发模型的程序难于编写、阅读、理解和维护。一旦程序发生问题，查找Bug的过程更是漫长和艰辛。
 
-Go语言从设计伊始，就将解决上面这个传统并发模型的问题作为Go的一个目标，并在新并发模型设计中借鉴了著名计算机科学家[Tony Hoare](https://en.wikipedia.org/wiki/Tony_Hoare)提出的**CSP（Communicating Sequential Processes，通信顺序进程）**并发模型。
+Go语言从设计伊始，就将解决上面这个传统并发模型的问题作为Go的一个目标，并在新并发模型设计中借鉴了著名计算机科学家[Tony Hoare](https://en.wikipedia.org/wiki/Tony_Hoare)提出的**==CSP==（Communicating Sequential Processes，通信顺序进程）**并发模型。
 
-CSP模型旨在简化并发程序的编写，让并发程序的编写与编写顺序程序一样简单。Tony Hoare认为输入输出应该是基本的编程原语，数据处理逻辑（也就是CSP中的P）只需调用输入原语获取数据，顺序地处理数据，并将结果数据通过输出原语输出就可以了。
+CSP模型旨在简化并发程序的编写，让并发程序的编写与编写顺序程序一样简单。Tony Hoare认为输入输出应该是基本的编程原语，**数据处理逻辑**（也就是CSP中的P）只需调用输入原语获取数据，顺序地处理数据，并将结果数据通过输出原语输出就可以了。
 
 因此，在Tony Hoare眼中，**一个符合CSP模型的并发程序应该是一组通过输入输出原语连接起来的P的集合**。从这个角度来看，CSP理论不仅是一个并发参考模型，也是一种**并发程序的程序组织方法**。它的组合思想与Go的设计哲学不谋而合。
 
@@ -4763,7 +4811,7 @@ Tony Hoare的CSP理论中的P，也就是“Process（进程）”，是一个�
 
 ![](images/image-20240711235319311.png)
 
-这里的P并不一定与操作系统的进程或线程划等号。在Go中，与“Process”对应的是goroutine。为了实现CSP并发模型中的输入和输出原语，Go还引入了goroutine（P）之间的通信原语channel。goroutine可以从channel获取输入数据，再将处理后得到的结果数据通过channel输出。通过channel将goroutine（P）组合连接在一起，让设计和编写大型并发系统变得更加简单和清晰。
+这里的P并不一定与操作系统的进程或线程划等号。在Go中，与“Process”对应的是goroutine。为了实现CSP并发模型中的输入和输出原语，Go还引入了**goroutine（P）之间的通信原语**`channel`。goroutine可以从channel获取输入数据，再将处理后得到的结果数据通过channel输出。通过channel将goroutine（P）组合连接在一起，让设计和编写大型并发系统变得更加简单和清晰。
 
 上面提到的获取goroutine的退出状态，就可以使用channel原语实现：
 
@@ -4787,37 +4835,96 @@ func main() {
 }
 ```
 
-🔖
+在main goroutine与子goroutine之间建立了一个元素类型为error的channel，子goroutine退出时，会将它执行的函数的错误返回值写入这个channel，main goroutine可以通过读取channel的值来获取子goroutine的退出状态。
 
 
 
 ## 32 并发：聊聊Goroutine调度器的原理
 
+> Go运行时是如何将一个个Goroutine调度到CPU上执行的？
+
 ### 32.1 Goroutine调度器
 
-可是，在操作系统层面，线程竞争的“CPU”资源是真实的物理CPU，但在Go程序层面，各个Goroutine要竞争的“CPU”资源又是什么呢？
+将这些Goroutine按照一定算法放到==“CPU”==上执行的程序，就被称为==Goroutine调度器（Goroutine Scheduler）==。
+
+一个Go程序对于操作系统来说只是一个**用户层程序**，操作系统眼中只有线程。
+
+一个Go程序中：用户层代码 + Go运行时。
+
+Goroutine们要竞争的“CPU”资源就是**操作系统线程**。
+
+Goroutine调度器的任务也就明确了：**将Goroutine按照一定算法放到不同的操作系统线程中去执行**。
 
 
 
 ### 32.2 Goroutine调度器模型与演化过程
 
-Goroutine调度器的实现不是一蹴而就的，它的调度模型与算法也是几经演化，从最初的G-M模型、到G-P-M模型，从不支持抢占，到支持协作式抢占，再到支持基于信号的异步抢占，Goroutine调度器经历了不断地优化与打磨。
+Goroutine调度器的实现不是一蹴而就的，它的调度模型与算法也是几经演化，**从最初的G-M模型、到G-P-M模型，从不支持抢占，到支持协作式抢占，再到支持基于信号的异步抢占**，Goroutine调度器经历了不断地优化与打磨。
 
-**G-M模型**
+#### G-M模型
+
+2012年3月28日，Go 1.0
+
+在这个调度器中，每个Goroutine对应于运行时中的一个抽象结构：==G==(Goroutine)；而被视作“物理CPU”的操作系统线程被抽象为：==M==(machine)。
+
+调度器的工作就是将G调度到M上去运行。
+
+G-M模型的一个重要不足：**限制了Go并发程序的伸缩性，尤其是对那些有高吞吐或并行计算需求的服务程序**。这个问题主要体现在：
+
+- 单一全局互斥锁`(Sched.Lock)` 和集中状态存储的存在，导致所有Goroutine相关操作，比如创建、重新调度等，都要上锁；
+- Goroutine传递问题：M经常在M之间传递“可运行”的Goroutine，这导致调度延迟增大，也增加了额外的性能损耗；
+- 每个M都做内存缓存，导致内存占用过高，数据局部性较差；
+- 由于系统调用（syscall）而形成的频繁的工作线程阻塞和解除阻塞，导致额外的性能损耗。
 
 
 
-**G-P-M调度模型**和[work stealing算法](http://supertech.csail.mit.edu/papers/steal.pdf)
+#### G-P-M调度模型
+
+Go 1.1
+
+[work stealing算法](http://supertech.csail.mit.edu/papers/steal.pdf)
+
+德米特里·维尤科夫通过向G-M模型中增加了一个P，让Go调度器具有很好的伸缩性。
+
+P是一个“逻辑Proccessor”，每个G（Goroutine）要想真正运行起来，首先需要被分配一个P，也就是进入到P的本地运行队列（local runq）中。对于G来说，P就是运行它的“CPU”，可以说：**在G的眼里只有P**。但从Go调度器的视角来看，真正的“CPU”是M，只有将P和M绑定，才能让P的runq中的G真正运行起来。
 
 
 
 ![](images/b5d81e17e041461ea7e78ae159f6ea3c.jpg)
 
-### 32.3 深入G-P-M模型
+
+
+此时，调度器仍然有一个令人头疼的问题，那就是**不支持抢占式调度**，这导致一旦某个G中出现死循环的代码逻辑，那么G将永久占用分配给它的P和M，而位于同一个P中的其他G将得不到调度，出现“**饿死**”的情况。
+
+#### “抢占式”调度
+
+德米特里·维尤科夫在Go 1.2中实现了基于协作的“抢占式”调度。
+
+这个抢占式调度的原理就是，Go编译器在每个函数或方法的入口处加上了一段额外的代码(`runtime.morestack_noctxt`)，让运行时有机会在这段代码中检查是否需要执行抢占调度。
+
+这种解决方案只能说局部解决了“饿死”问题，只在有函数调用的地方才能插入“抢占”代码（埋点），对于没有函数调用而是纯算法循环计算的G，Go调度器依然无法抢占。
+
+比如，死循环等并没有给编译器插入抢占代码的机会，这就会导致GC在等待所有Goroutine停止时的等待时间过长，从而[导致GC延迟](https://github.com/golang/go/issues/10958)，内存占用瞬间冲高；甚至在一些特殊情况下，导致在STW（stop the world）时死锁。
+
+为了解决这些问题，Go在1.14版本中接受了奥斯汀·克莱门茨（Austin Clements）的[提案](https://go.googlesource.com/proposal/+/master/design/24543-non-cooperative-preemption.md)，增加了**对非协作的抢占式调度的支持**，这种抢占式调度是基于系统信号的，也就是通过向线程发送信号的方式来抢占正在运行的Goroutine。
+
+除了这些大的迭代外，Goroutine的调度器还有一些小的优化改动，比如**通过文件I/O poller减少M的阻塞等**。
+
+Go运行时已经实现了netpoller，这使得即便G发起网络I/O操作，也不会导致M被阻塞（仅阻塞G），也就不会导致大量线程（M）被创建出来。
+
+但是对于文件I/O操作来说，一旦阻塞，那么线程（M）将进入挂起状态，等待I/O返回后被唤醒。这种情况下P将与挂起的M分离，再选择一个处于空闲状态（idle）的M。如果此时没有空闲的M，就会新创建一个M（线程），所以，这种情况下，大量I/O操作仍然会导致大量线程被创建。
+
+为了解决这个问题，Go开发团队的伊恩·兰斯·泰勒（Ian Lance Taylor）在Go 1.9中增加了一个[针对文件I/O的Poller](https://groups.google.com/forum/#!topic/golang-dev/tT8SoKfHty0)的功能，这个功能可以像netpoller那样，在G操作那些支持监听（pollable）的文件描述符时，仅会阻塞G，而不会阻塞M。不过这个功能依然不能对常规文件有效，常规文件是不支持监听的（pollable）。但对于Go调度器而言，这也算是一个不小的进步了。
+
+从Go 1.2以后，Go调度器就一直稳定在G-P-M调度模型上，尽管有各种优化和改进，但也都是基于这个模型之上的。那未来的Go调度器会往哪方面发展呢？德米特里·维尤科夫在2014年9月提出了一个新的设计草案文档：《[NUMA‐aware scheduler for Go](https://docs.google.com/document/u/0/d/1d3iI2QWURgDIsSR6G2275vMeQ_X7w-qxM2Vp7iGwwuM/pub)》，作为对未来Goroutine调度器演进方向的一个提议，不过至今似乎这个提议也没有列入开发计划。
+
+### 32.3 深入G-P-M模型 🔖
+
+Go语言中Goroutine的调度、GC、内存管理等是Go语言原理最复杂、最难懂的地方，并且这三方面的内容随着Go版本的演进也在不断更新。
 
 #### G、P和M
 
-
+`$GOROOT/src/runtime/runtime2.go`
 
 #### G被抢占调度
 
@@ -4830,39 +4937,241 @@ Goroutine调度器的实现不是一蹴而就的，它的调度模型与算法�
 
 ## 33 并发：小channel中蕴含大智慧
 
-CSP（Communicating Sequential Processes）理论
+Go语言的CSP模型的实现包含两个主要组成部分：
 
-Go语言的CSP模型的实现包含两个主要组成部分：一个是Goroutine，它是Go应用并发设计的基本构建与执行单元；另一个就是channel，它在并发模型中扮演着重要的角色。
+- 一个是Goroutine，它是Go应用并发设计的基本构建与执行单元；
+- 另一个就是channel，它在并发模型中扮演着重要的角色。
 
-### 作为一等公民的channel
+channel既可以用来实现Goroutine间的==通信==，还可以实现Goroutine间的==同步==。
 
-- 创建channel
-- 发送与接收
-- 关闭channel
-- select
+### 33.1 作为一等公民的channel
 
-### 无缓冲channel的惯用法
+可以像使用普通变量那样使用channel。
 
-- 第一种用法：用作信号传递
-- 第二种用法：用于替代锁机制
+#### 创建channel
 
-### 带缓冲channel的惯用法
+和切片、结构体、map等一样，channel也是一种复合数据类型。也就是说，我们在声明一个channel类型变量时，必须给出其具体的元素类型。
 
-- 第一种用法：用作消息队列
-- 第二种用法：用作计数信号量（counting semaphore）
-- len(channel)的应用
+```go
+var ch chan int  // 声明了一个元素为int类型的channel类型变量ch
+```
 
-### nil channel的妙用
+为channel类型变量赋初值的唯一方法就是`make`:
 
-### 与select结合使用的一些惯用法
+```go
+ch1 := make(chan int)     // 无缓冲channel
+ch2 := make(chan int, 5)   // 带缓冲channel
+```
 
-- 第一种用法：利用default分支避免阻塞
-- 第二种用法：实现超时机制
-- 第三种用法：实现心跳机制
+
+
+#### 发送与接收
+
+`<-`操作符用于对channel类型变量进行发送与接收操作：
+
+```go
+ch1 <- 13    // 将整型字面值13发送到无缓冲channel类型变量ch1中
+n := <- ch1  // 从无缓冲channel类型变量ch1中接收一个整型值存储到整型变量n中
+ch2 <- 17    // 将整型字面值17发送到带缓冲channel类型变量ch2中
+m := <- ch2  // 从带缓冲channel类型变量ch2中接收一个整型值存储到整型变量m中
+```
+
+1️⃣由于无缓冲channel的运行时层实现不带有缓冲区，所以Goroutine对无缓冲channel的接收和发送操作是同步的。也就是说，对同一个无缓冲channel，只有对它进行接收操作的Goroutine和对它进行发送操作的Goroutine都存在的情况下，通信才能得以进行，否则单方面的操作会让对应的Goroutine陷入挂起状态，如：
+
+```go
+func main() {
+    ch1 := make(chan int)
+    ch1 <- 13 // fatal error: all goroutines are asleep - deadlock!
+    n := <-ch1
+    println(n)
+}
+```
+
+创建了一个无缓冲的channel类型变量ch1，对ch1的读写都放在了一个Goroutine中。
+
+只需要将接收操作，或者发送操作放到另外一个Goroutine中就可以了：
+
+```go
+func main() {
+    ch1 := make(chan int)
+    go func() {
+        ch1 <- 13 // 将发送操作放入一个新goroutine中执行
+    }()
+    n := <-ch1
+    println(n)
+}
+```
+
+结论：**对无缓冲channel类型的发送与接收操作，一定要放在两个不同的Goroutine中进行，否则会导致deadlock**。
+
+2️⃣和无缓冲channel相反，带缓冲channel的运行时层实现带有缓冲区，因此，对带缓冲channel的发送操作在缓冲区未满、接收操作在缓冲区非空的情况下是**异步**的（发送或接收不需要阻塞等待）。
+
+也就是说，对一个带缓冲channel来说，在缓冲区未满的情况下，对它进行发送操作的Goroutine并不会阻塞挂起；在缓冲区有数据的情况下，对它进行接收操作的Goroutine也不会阻塞挂起。
+
+但当缓冲区满了的情况下，对它进行发送操作的Goroutine就会阻塞挂起；当缓冲区为空的情况下，对它进行接收操作的Goroutine也会阻塞挂起。
+
+几个关于带缓冲channel的操作的例子:
+
+```go
+ch2 := make(chan int, 1)
+n := <-ch2 // 由于此时ch2的缓冲区中无数据，因此对其进行接收操作将导致goroutine挂起
+
+ch3 := make(chan int, 1)
+ch3 <- 17  // 向ch3发送一个整型数17
+ch3 <- 27  // 由于此时ch3中缓冲区已满，再向ch3发送数据也将导致goroutine挂起
+```
+
+操作符`<-`还可以声明**只发送channel类型**（send-only）和**只接收channel类型**（recv-only）: 🔖
+
+```go
+ch1 := make(chan<- int, 1) // 只发送channel类型
+ch2 := make(<-chan int, 1) // 只接收channel类型
+
+<-ch1       // invalid operation: <-ch1 (receive from send-only type chan<- int)
+ch2 <- 13   // invalid operation: ch2 <- 13 (send to receive-only type <-chan int)
+```
+
+**试图从一个只发送channel类型变量中接收数据，或者向一个只接收channel类型发送数据，都会导致编译错误**。
+
+通常只发送channel类型和只接收channel类型，会被用作函数的参数类型或返回值，用于限制对channel内的操作，或者是明确可对channel进行的操作的类型，例子：
+
+```go
+func produce(ch chan<- int) {
+    for i := 0; i < 10; i++ {
+        ch <- i + 1
+        time.Sleep(time.Second)
+    }
+    close(ch)
+}
+
+func consume(ch <-chan int) {
+    for n := range ch {
+        println(n)
+    }
+}
+
+func main() {
+    ch := make(chan int, 5)
+    var wg sync.WaitGroup
+    wg.Add(2)
+    go func() {
+        produce(ch)
+        wg.Done()
+    }()
+
+    go func() {
+        consume(ch)
+        wg.Done()
+    }()
+
+    wg.Wait()
+}
+```
+
+启动了两个Goroutine，分别代表生产者（produce）与消费者（consume）。生产者只能向channel中发送数据，我们使用`chan<- int`作为produce函数的参数类型；消费者只能从channel中接收数据，我们使用`<-chan int`作为consume函数的参数类型。
+
+在消费者函数consume中，我们使用了for range循环语句来从channel中接收数据，for range会阻塞在对channel的接收操作上，直到channel中有数据可接收或channel被关闭循环，才会继续向下执行。channel被关闭后，for range循环也就结束了。
+
+#### 关闭channel
+
+
+
+```go
+ch := make(chan int, 5)
+close(ch)
+ch <- 13 // panic: send on closed channel
+```
+
+
+
+#### select 🔖
+
+同时对多个channel进行操作时
+
+```go
+select {
+case x := <-ch1:     // 从channel ch1接收数据
+	... ...
+
+case y, ok := <-ch2: // 从channel ch2接收数据，并根据ok值判断ch2是否已经关闭
+	... ...
+
+case ch3 <- z:       // 将z值发送到channel ch3中:
+	... ...
+
+default:             // 当上面case中的channel通信均无法实施时，执行该默认分支
+}
+```
+
+
+
+
+
+### 33.2 无缓冲channel的惯用法 🔖
+
+无缓冲channel兼具通信和同步特性，在并发程序中应用颇为广泛。
+
+#### 第一种用法：用作信号传递
+
+- 1对1通知信号
+
+
+
+- 1对n通知信号
+
+#### 第二种用法：用于替代锁机制
+
+- 一个传统的、基于“共享内存”+“互斥锁”的Goroutine安全的计数器
+
+
+
+- 无缓冲channel替代锁
+
+### 33.3 带缓冲channel的惯用法 🔖
+
+#### 第一种用法：用作消息队列
+
+
+
+#### 第二种用法：用作计数信号量（counting semaphore）
+
+
+
+
+
+#### len(channel)的应用
+
+
+
+
+
+### 33.4 nil channel的妙用
+
+如果一个channel类型变量的值为nil，称它为**nil channel**。nil channel有一个特性，那就是**对nil channel的读写都会发生阻塞**。
+
+
+
+### 33.5 与select结合使用的一些惯用法
+
+#### 第一种用法：利用default分支避免阻塞
+
+
+
+#### 第二种用法：实现超时机制
+
+
+
+#### 第三种用法：实现心跳机制
 
 
 
 ## 34 并发：如何使用共享变量？
+
+> Rob Pike：“不要通过共享内存来通信，应该通过通信来共享内存（Don’t communicate by sharing memory, share memory by communicating）”
+
+Go主流风格：**使用channel进行不同Goroutine间的通信**。
+
+不过，Go也并没有彻底放弃基于共享内存的并发模型，而是在提供CSP并发模型原语的同时，还通过标准库的sync包，提供了针对传统的、基于共享内存并发模型的低级同步原语，包括：互斥锁（sync.Mutex）、读写锁（sync.RWMutex）、条件变量（sync.Cond）等，并通过atomic包提供了原子操作原语等等。
 
 ### sync包低级同步原语可以用在哪？
 
@@ -4871,11 +5180,19 @@ Go语言的CSP模型的实现包含两个主要组成部分：一个是Goroutine
 
 ### sync包中同步原语使用的注意事项
 
+
+
 ### 互斥锁（Mutex）还是读写锁（RWMutex）？
+
+
 
 ### 条件变量
 
+
+
 ### 原子操作（atomic operations）
+
+
 
 
 
