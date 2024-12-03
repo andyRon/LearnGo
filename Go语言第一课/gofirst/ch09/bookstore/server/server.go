@@ -15,6 +15,10 @@ type BookStoreServer struct {
 	srv *http.Server
 }
 
+// NewBookStoreServer 创建一个新的书店服务器实例。
+// 参数 addr: 服务器的监听地址。
+// 参数 s: 一个实现了 store.Store 接口的存储实例。
+// 返回值: *BookStoreServer: 书店服务器的实例。
 func NewBookStoreServer(addr string, s store.Store) *BookStoreServer {
 	srv := &BookStoreServer{
 		s: s,

@@ -12,12 +12,12 @@ func main() {
 	//str2()
 	//str3()
 
-	//encodeRune()
+	encodeRune()
 	//decodeRune()
 
 	//str4()
 
-	str5()
+	//str5()
 }
 
 func str1() {

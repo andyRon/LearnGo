@@ -7,7 +7,9 @@ import (
 )
 
 func init() {
-	factory.Register("mem", &MemStore{ // 调用factory包提供的Register函数，把自己的实例以“mem”的名称注册到factory中
+	// 调用factory包提供的Register函数，把自己的实例以“mem”的名称注册到factory中
+	// 好处：只要导入internal/store这个包，就可以自动完成注册动作了
+	factory.Register("mem", &MemStore{
 		books: make(map[string]*mystore.Book),
 	})
 }
