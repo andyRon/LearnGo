@@ -5255,7 +5255,7 @@ Go的设计者将面向多核、**原生支持并发**作为了Go语言的设计
 
 ### 31.1 什么是并发？
 
-并发（concurrency）
+并发（concurrency） 
 
 并行（parallelism）
 
@@ -5267,9 +5267,9 @@ Go的设计者将面向多核、**原生支持并发**作为了Go语言的设计
 
 这个设计下，每个单进程应用对应一个操作系统进程，操作系统内的多个进程按时间片大小，被轮流调度到仅有的一颗单核处理器上执行。换句话说，这颗单核处理器在某个时刻只能执行一个进程对应的程序代码，两个进程不存在并行执行的可能。
 
-**并行（parallelism），指的就是在同一时刻，有两个或两个以上的任务（这里指进程）的代码在处理器上执行**。从这个概念我们也可以知道，多个处理器或多核处理器是并行执行的必要条件。
+**==并行（parallelism）==，指的就是在同一时刻，有两个或两个以上的任务（这里指进程）的代码在处理器上执行**。从这个概念也可以知道，多个处理器或多核处理器是并行执行的必要条件。
 
-总的来说，单进程应用的设计比较简单，它的内部仅有一条代码执行流，代码从头执行到尾，**不存在竞态，无需考虑同步问题**。
+总的来说，单进程应用的设计比较简单，它的内部仅有一条代码执行流，代码从头执行到尾，**不存在==竞态==，无需考虑同步问题**。
 
 用户层的另外一种设计方式，就是==多进程应用==，也就是应用通过fork等系统调用创建多个子进程，共同实现应用的功能。多进程应用的情况下，用户层应用、操作系统进程以及处理器之间的关系:
 
@@ -5282,8 +5282,6 @@ Go的设计者将面向多核、**原生支持并发**作为了Go语言的设计
 **粗略看起来，多进程应用与单进程应用相比并没有什么质的提升。那我们为什么还要将应用设计为多进程呢？**
 
 这更多是从**应用的结构**角度去考虑的，多进程应用由于**将功能职责做了划分**，并指定专门的模块来负责，所以从结构上来看，要比单进程更为清晰简洁，可读性与可维护性也更好。**这种将程序分成多个可独立执行的部分的结构化程序的设计方法，就是==并发设计==**。采用了并发设计的应用也可以看成是**一组独立执行的模块的组合**。
-
-
 
 不过，进程并不适合用于承载采用了并发设计的应用的模块执行流。因为进程是操作系统中资源拥有的基本单位，它不仅包含应用的代码和数据，还有系统级的资源，比如文件描述符、内存地址空间等等。进程的“包袱”太重，这导致它的创建、切换与撤销的代价都很大。
 
@@ -5355,15 +5353,15 @@ c := srv.newConn(rw)
 go c.serve(connCtx)
 ```
 
+上面例子中，通过go关键字，可以基于已有的具名函数/方法创建goroutine，也可以基于匿名函数/闭包创建goroutine。
 
-
-多数情况下，我们不需要考虑对goroutine的退出进行控制：**goroutine的执行函数的返回，就意味着goroutine退出。**
+多数情况下，不需要考虑对goroutine的退出进行控制：**goroutine的执行函数的返回，就意味着goroutine退出。**
 
 如果main goroutine退出了，那么也意味着整个应用程序的退出。此外，你还要注意的是，**goroutine执行的函数或方法即便有返回值，Go也会忽略这些返回值**。所以，如果你要获取goroutine执行后的返回值，你需要另行考虑其他方法，比如通过goroutine间的通信来实现。
 
 #### goroutine间的通信
 
-传统的编程语言（比如：C++、Java、Python等）并非面向并发而生的，所以他们面对并发的逻辑多是**基于操作系统的线程**。并发的执行单元（线程）之间的通信，利用的也是操作系统提供的线程或进程间通信的原语，比如：**共享内存、信号（signal）、管道（pipe）、消息队列、套接字（socket）**等。
+传统的编程语言（比如：C++、Java、Python等）并非面向并发而生的，所以他们面对并发的逻辑多是**基于操作系统的线程**。并发的执行单元（线程）之间的通信，利用的也是操作系统提供的**线程或进程间通信**的原语，比如：**共享内存、信号（signal）、管道（pipe）、消息队列、套接字（socket）**等。
 
 在这些通信原语中，使用最多、最广泛的（也是最高效的）是结合了线程同步原语（比如：锁以及更为低级的原子操作）的共享内存方式，因此，我们可以说传统语言的并发模型是**基于对内存的共享的**。
 
@@ -5407,15 +5405,19 @@ func main() {
 
 在main goroutine与子goroutine之间建立了一个元素类型为error的channel，子goroutine退出时，会将它执行的函数的错误返回值写入这个channel，main goroutine可以通过读取channel的值来获取子goroutine的退出状态。
 
-
-
-然CSP模型已经成为Go语言支持的主流并发模型，但Go也支持传统的、基于共享内存的并发模型，并提供了基本的低级别同步原语（主要是sync包中的互斥锁、条件变量、读写锁、原子操作等）。
+虽然CSP模型已经成为Go语言支持的主流并发模型，但Go也支持传统的、基于共享内存的并发模型，并提供了基本的低级别同步原语（主要是sync包中的互斥锁、条件变量、读写锁、原子操作等）。
 
 **Go始终推荐以CSP并发模型风格构建并发程序**。不过，对于局部情况，比如涉及性能敏感的区域或需要保护的结构体数据时，我们可以使用更为高效的低级同步原语（如mutex），保证goroutine对数据的同步访问。
 
+思考
+
+> goroutine作为Go应用的基本执行单元，它的创建、退出以及goroutine间的通信都有很多常见的模式可循。
+>
+> 日常开发中实用的goroutine使用模式有哪些？
 
 
-## 32 并发：聊聊Goroutine调度器的原理
+
+## 32 并发：聊聊Goroutine调度器的原理🔖
 
 > Go运行时是如何将一个个Goroutine调度到CPU上执行的？
 
@@ -5425,13 +5427,11 @@ func main() {
 
 一个Go程序对于操作系统来说只是一个**用户层程序**，操作系统眼中只有线程。
 
-一个Go程序中：用户层代码 + Go运行时。
+一个Go程序 = 用户层代码 + Go运行时。
 
 Goroutine们要竞争的“CPU”资源就是**操作系统线程**。
 
 Goroutine调度器的任务也就明确了：**将Goroutine按照一定算法放到不同的操作系统线程中去执行**。
-
-
 
 ### 32.2 Goroutine调度器模型与演化过程
 
@@ -5452,15 +5452,13 @@ G-M模型的一个重要不足：**限制了Go并发程序的伸缩性，尤其�
 - 每个M都做内存缓存，导致内存占用过高，数据局部性较差；
 - 由于系统调用（syscall）而形成的频繁的工作线程阻塞和解除阻塞，导致额外的性能损耗。
 
-
-
 #### G-P-M调度模型
 
 Go 1.1
 
 [work stealing算法](http://supertech.csail.mit.edu/papers/steal.pdf)
 
-德米特里·维尤科夫通过向G-M模型中增加了一个P，让Go调度器具有很好的伸缩性。
+为了解决上面的一些问题，德米特里·维尤科夫通过向G-M模型中增加了一个P，让Go调度器具有很好的伸缩性。
 
 P是一个“逻辑Proccessor”，每个G（Goroutine）要想真正运行起来，首先需要被分配一个P，也就是进入到P的本地运行队列（local runq）中。对于G来说，P就是运行它的“CPU”，可以说：**在G的眼里只有P**。但从Go调度器的视角来看，真正的“CPU”是M，只有将P和M绑定，才能让P的runq中的G真正运行起来。
 
@@ -5558,16 +5556,103 @@ type m struct {
 
 答案就是：**G是被抢占调度的**。
 
-🔖
+前面说过，除非极端的无限循环，否则只要G调用函数，Go运行时就有了抢占G的机会。Go程序启动时，运行时会去启动一个名为`sysmon`的M（一般称为**监控线程**），这个M的特殊之处在于它不需要绑定P就可以运行（以g0这个G的形式），这个M在整个Go程序的运行过程中至关重要，你可以看下我对sysmon被创建的部分代码以及sysmon的执行逻辑摘录：
 
+```go
+//$GOROOT/src/runtime/proc.go
 
+// The main goroutine.
+func main() {
+     ... ...
+    systemstack(func() {
+        newm(sysmon, nil)
+    })
+    .... ...
+}
+
+// Always runs without a P, so write barriers are not allowed.
+//
+//go:nowritebarrierrec
+func sysmon() {
+    // If a heap span goes unused for 5 minutes after a garbage collection,
+    // we hand it back to the operating system.
+    scavengelimit := int64(5 * 60 * 1e9)
+    ... ...
+
+    if  .... {
+        ... ...
+        // retake P's blocked in syscalls
+        // and preempt long running G's
+        if retake(now) != 0 {
+            idle = 0
+        } else {
+            idle++
+        }
+       ... ...
+    }
+}
+```
+
+sysmon每20us~10ms启动一次，主要完成了这些工作：
+
+- 释放闲置超过5分钟的span内存；
+- 如果超过2分钟没有垃圾回收，强制执行；
+- 将长时间未处理的netpoll结果添加到任务队列；
+- 向长时间运行的G任务发出抢占调度；
+- 收回因syscall长时间阻塞的P；
+
+sysmon将“向长时间运行的G任务发出抢占调度”，这个事情由函数`retake`实施：
+
+```go
+// $GOROOT/src/runtime/proc.go
+
+// forcePreemptNS is the time slice given to a G before it is
+// preempted.
+const forcePreemptNS = 10 * 1000 * 1000 // 10ms
+
+func retake(now int64) uint32 {
+          ... ...
+           // Preempt G if it's running for too long.
+            t := int64(_p_.schedtick)
+            if int64(pd.schedtick) != t {
+                pd.schedtick = uint32(t)
+                pd.schedwhen = now
+                continue
+            }
+            if pd.schedwhen+forcePreemptNS > now {
+                continue
+            }
+            preemptone(_p_)
+         ... ...
+}
+
+func preemptone(_p_ *p) bool {
+    mp := _p_.m.ptr()
+    if mp == nil || mp == getg().m {
+        return false
+    }
+    gp := mp.curg
+    if gp == nil || gp == mp.g0 {
+        return false
+    }
+
+    gp.preempt = true //设置被抢占标志
+
+    // Every call in a go routine checks for stack overflow by
+    // comparing the current stack pointer to gp->stackguard0.
+    // Setting gp->stackguard0 to StackPreempt folds
+    // preemption into the normal stack overflow check.
+    gp.stackguard0 = stackPreempt
+    return true
+}
+```
+
+上面的代码中显示，**如果一个G任务运行10ms，sysmon就会认为它的运行时间太久而发出抢占式调度的请求**。一旦G的抢占标志位被设为true，那么等到这个G下一次调用函数或方法时，运行时就可以将G抢占并移出运行状态，放入队列中，等待下一次被调度。
 
 除了这个常规调度之外，还有两个特殊情况下G的调度方法:
 
 - 第一种：channel阻塞或网络I/O情况下的调度。
 - 第二种：系统调用阻塞情况下的调度。
-
-
 
 
 
@@ -5803,7 +5888,7 @@ default:             // 当上面case中的channel通信均无法实施时，执
 
 
 
-## 34 并发：如何使用共享变量？
+## 34 并发：如何使用共享变量？🔖
 
 > Rob Pike：“不要通过共享内存来通信，应该通过通信来共享内存（Don’t communicate by sharing memory, share memory by communicating）”
 
@@ -6085,7 +6170,7 @@ Go程序的优化，也有着固定的套路可循:
 
 
 
-## Go泛型诞生过程🔖
+## 39 Go泛型诞生过程
 
 [Go 1.18 Beta2版本](https://go.dev/blog/go1.18beta2)
 
@@ -6095,11 +6180,27 @@ Go程序的优化，也有着固定的套路可循:
 
 将**算法与类型解耦**
 
+
+
+对于简单的、诸如上面这样的加法函数还可忍受，但对于复杂的算法，比如涉及复杂排序、查找、树、图等算法，以及一些容器类型（链表、栈、队列等）的实现时，缺少了泛型的支持还真是麻烦。
+
+在没有泛型之前，Gopher们通常使用空接口类型interface{}，作为算法操作的对象的数据类型，不过这样做的不足之处也很明显：**一是无法进行类型安全检查，二是性能有损失**。
+
+
+
 ### 2 Go泛型设计的简史
+
+[“泛型窘境”](https://research.swtch.com/generic)
+
+
 
 
 
 ### 3 Go泛型的基本语法
+
+Go泛型是Go开源以来在语法层面的最大一次变动。
+
+[Go泛型的最后一版技术提案](https://go.googlesource.com/proposal/+/refs/heads/master/design/43651-type-parameters.md)
 
 #### 类型参数（type parameter）
 
@@ -6135,7 +6236,7 @@ Go程序的优化，也有着固定的套路可循:
 
 
 
-## 39 类型参数 🔖
+## 40 类型参数 🔖
 
 Go的泛型与其他主流编程语言的泛型不同点（[不支持的若干特性](https://github.com/golang/proposal/blob/master/design/43651-type-parameters.md#omissions)）：
 
@@ -6147,13 +6248,15 @@ Go的泛型与其他主流编程语言的泛型不同点（[不支持的若干�
 
 
 
-### 例子：返回切片中值最大的元素
+### 40.1 例子：返回切片中值最大的元素
 
 
 
 Go语言提供的any（interface{}的别名）
 
-### 类型参数（type parameters）
+
+
+### 40.2 类型参数（type parameters）
 
 #### 泛型函数
 
@@ -6167,7 +6270,7 @@ Go语言提供的any（interface{}的别名）
 
 
 
-## 40 定义泛型约束
+## 41 定义泛型约束
 
 虽然泛型是开发人员表达“通用代码”的一种重要方式，但这并不意味着所有泛型代码对所有类型都适用。更多的时候，我们需要对泛型函数的类型参数以及泛型函数中的实现代码**设置限制**。泛型函数调用者只能传递满足限制条件的类型实参，泛型函数内部也只能以类型参数允许的方式使用这些类型实参值。在Go泛型语法中，我们使用**类型参数约束**（type parameter constraint）（以下简称**约束**）来表达这种限制条件。
 
@@ -6203,9 +6306,9 @@ Go语言提供的any（interface{}的别名）
 
 
 
-## 41 明确使用时机
+## 42 明确使用时机
 
-### 何时适合使用泛型？
+### 42.1 何时适合使用泛型？
 
 #### 场景一：编写通用数据结构时
 
@@ -6215,7 +6318,7 @@ Go语言提供的any（interface{}的别名）
 
 
 
-### Go泛型实现原理简介
+### 42.2 Go泛型实现原理简介
 
 #### Stenciling方案
 
@@ -6225,13 +6328,13 @@ Go语言提供的any（interface{}的别名）
 
 
 
-### 泛型对执行效率的影响
+### 42.3 泛型对执行效率的影响
 
 
 
 # 补充
 
-## 如何拉取私有的GoModule？🔖
+## 43 如何拉取私有的Go Module？🔖
 
 ### 导入本地module
 
@@ -6267,7 +6370,7 @@ Go语言提供的any（interface{}的别名）
 
 
 
-## 作为GoModule的作者，你应该知道的几件事
+## 44 作为Go Module的作者，你应该知道的几件事
 
 ### 仓库布局：是单module还是多module
 
@@ -6316,6 +6419,10 @@ p = (*T)(p1)               // unsafe.Pointer也可以显式转换为任意指针
 #### 限制二：不支持指针运算。
 
 
+
+
+
+## Go语言的GC实现
 
 
 
