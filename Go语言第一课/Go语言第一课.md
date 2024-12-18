@@ -6182,19 +6182,33 @@ Go程序的优化，也有着固定的套路可循:
 
 
 
+在没有泛型的情况下，需要针对不同类型重复实现相同的算法逻辑。
+
 对于简单的、诸如上面这样的加法函数还可忍受，但对于复杂的算法，比如涉及复杂排序、查找、树、图等算法，以及一些容器类型（链表、栈、队列等）的实现时，缺少了泛型的支持还真是麻烦。
 
-在没有泛型之前，Gopher们通常使用空接口类型interface{}，作为算法操作的对象的数据类型，不过这样做的不足之处也很明显：**一是无法进行类型安全检查，二是性能有损失**。
+在没有泛型之前，Gopher们通常使用空接口类型`interface{}`，作为算法操作的对象的数据类型，不过这样做的不足之处也很明显：**一是无法进行类型安全检查，二是性能有损失**。
 
 
 
 ### 2 Go泛型设计的简史
 
-[“泛型窘境”](https://research.swtch.com/generic)
+[“泛型窘境”](https://research.swtch.com/generic) 2019 Russ Cox提出了Go泛型实现的三个可遵循的方法，以及每种方法的不足，也就是三个slow（拖慢）：
 
+- **拖慢程序员**：不实现泛型，不会引入复杂性，但就像前面例子中那样，需要程序员花费精力重复实现AddInt、AddInt64等；
+- **拖慢编译器**：就像C++的泛型实现方案那样，通过增加编译器负担为每个类型实例生成一份单独的泛型函数的实现，这种方案产生了大量的代码，其中大部分是多余的，有时候还需要一个好的链接器来消除重复的拷贝；
+- **拖慢执行性能**：就像Java的泛型实现方案那样，通过隐式的装箱和拆箱操作消除类型差异，虽然节省了空间，但代码执行效率低。
 
+在当时，三个slow之间需要取舍，就如同数据一致性的CAP原则一样，无法将三个slow同时消除。
 
+[“Why Generics?”](https://go.dev/blog/why-generics)
 
+[《Featherweight Go》](https://arxiv.org/abs/2005.11710)
+
+[《The Next Step for Generics》](https://go.dev/blog/generics-next-step)
+
+...
+
+最后，在2021年12月14日，[Go 1.18 beta1版本发布](https://go.dev/blog/go1.18beta1)，这个版本包含了对Go泛型的正式支持。
 
 ### 3 Go泛型的基本语法
 
@@ -6202,29 +6216,159 @@ Go泛型是Go开源以来在语法层面的最大一次变动。
 
 [Go泛型的最后一版技术提案](https://go.googlesource.com/proposal/+/refs/heads/master/design/43651-type-parameters.md)
 
-#### 类型参数（type parameter）
+#### 1️⃣ 类型参数（type parameter）
 
-类型参数是在函数声明、方法声明的receiver部分或类型定义的类型参数列表中，声明的（非限定）类型名称。类型参数在声明中充当了一个未知类型的占位符（placeholder），在泛型函数或泛型类型实例化时，类型参数会被一个类型实参替换。
+==类型参数==是在函数声明、方法声明的receiver部分或类型定义的类型参数列表中，声明的（非限定）类型名称。类型参数在声明中充当了一个**未知类型的占位符（placeholder）**，在泛型函数或泛型类型实例化时，类型参数会被一个类型实参替换。
 
+普通函数的参数列表：
 
+```go
+func Foo(x, y aType, z anotherType)
+```
 
-#### 约束（constraint）
+这里，x, y, z是形参（parameter）的名字，也就是变量，而aType，anotherType是形参的类型，也就是类型。
+
+泛型函数的类型参数（type parameter）列表：
+
+```go
+func GenericFoo[P aConstraint, Q anotherConstraint](x,y P, z Q)
+```
+
+这里，P、Q是类型形参的名字，也就是类型。aConstraint，anotherConstraint代表类型参数的==约束（constraint）==，可以理解为对类型参数可选值的一种限定。
+
+相较而言多出一个组成部分：==类型参数列表==。
+
+类型参数列表位于函数名与函数参数列表之间，通过一个**方括号**括起，不支持变长类型参数。而且，类型参数列表中声明的类型参数，可以作为函数普通参数列表中的形参类型。
+
+P、Q的类型什么时候才能确定呢？等到泛型函数**具化（instantiation）**时才能确定。另外，按惯例，类型参数（type parameter）的名字都是首字母大写的，通常都是用单个大写字母命名。
+
+#### 2️⃣ 约束（constraint）
 
 约束（constraint）规定了一个类型实参（type argument）必须满足的条件要求。如果某个类型满足了某个约束规定的所有条件要求，那么它就是这个约束修饰的类型形参的一个合法的类型实参。
 
+```go
+type C1 interface {
+	~int | ~int32
+	M1()
+}
+
+type T struct{}
+
+func (T) M1() {
+}
+
+type T1 int
+
+func (T1) M1() {
+}
+
+func foo[P C1](t P) {
+
+}
+
+func main() {
+	var t1 T1
+	foo(t1)
+	var t T
+	foo(t) // 编译器报错： Cannot use T as the type C1. Type does not implement constraint 'C1' because type is not included in type set ('~int', '~int32')
+}
+```
+
+C1是定义的约束，它声明了一个方法M1，以及两个可用作类型实参的类型(~int | ~int32)，类型列表中的多个类型实参类型用“|”分隔。
+
+还定义了两个自定义类型T和T1，两个类型都实现了M1方法，但T类型的底层类型为struct{}，而T1类型的底层类型为int，这样就导致了虽然T类型满足了约束C1的方法集合，但类型T因为底层类型并不是int或int32而不满足约束C1，这也就会导致`foo(t)`调用在编译阶段报错。
+
+建议：**做约束的接口类型与做传统接口的接口类型最好要分开定义**，除非约束类型真的既需要方法集合，也需要类型列表。
+
+#### 3️⃣ 类型具化（instantiation）
+
+```go
+func Sort[Elem interface{ Less(y Elem) bool }](list []Elem) {
+}
+
+type book struct {
+}
+
+func (x book) Less(y book) bool {
+	return true
+}
+
+func main() {
+	var bookshelf []book
+	Sort[book](bookshelf) // 泛型函数调用
+}
+```
+
+上面的泛型函数调用`Sort[book](bookhelf)`会分成两个阶段：
+
+第一个阶段就是==具化（instantiation）==。
+
+形象点说，**具化（instantiation）就好比一家生产“排序机器”的工厂根据要排序的对象的类型，将这样的机器生产出来的过程**。我们继续举前面的例子来分析一下，整个具化过程如下：
+
+1. 工厂接单：**Sort[book]**，发现要排序的对象类型为book；
+2. 模具检查与匹配：检查book类型是否满足模具的约束要求（也就是是否实现了约束定义中的Less方法）。如果满足，就将其作为类型实参替换Sort函数中的类型形参，结果为**Sort[book]**，如果不满足，编译器就会报错；
+3. 生产机器：将泛型函数Sort具化为一个**新函数**，这里我们把它起名为**booksort**，其函数原型为**func([]book)**。本质上**booksort := Sort[book]**。
+
+第二阶段是==调用（invocation）==。
+
+一旦“排序机器”被生产出来，那么它就可以对目标对象进行排序了，这和普通的函数调用没有区别。这里就相当于调用booksort（bookshelf），整个过程只需要检查传入的函数实参（bookshelf）的类型与booksort函数原型中的形参类型（[]book）是否匹配就可以了。
+
+伪代码来表述上面两个过程：
+
+```plain
+Sort[book](bookshelf)
+
+<=>
+
+具化：booksort := Sort[book]
+调用：booksort(bookshelf)
+```
+
+简化，调用Sort不需要传入类型实参book，和普通函数调用那样，Go编译器会根据传入的实参变量，进行实参类型参数的自动推导（Argument type inference）：
+
+```go
+Sort(bookshelf)
+```
+
+#### 4️⃣ 泛型类型
+
+除了函数可以携带类型参数变身为“泛型函数”外，类型也可以拥有类型参数而化身为“泛型类型”，如定义一个向量泛型类型：
+
+```go
+type Vector[T any] []T
+```
+
+这是一个带有类型参数的类型定义，类型参数位于类型名的后面，同样用方括号括起。在类型定义体中可以引用类型参数列表中的参数名（比如T）。类型参数同样拥有自己的约束，如上面代码中的**any**。在Go 1.18中，any是interface{}的别名，也是一个预定义标识符，使用any作为类型参数的约束，代表没有任何约束。
+
+使用泛型类型，我们也要遵循先具化，再使用的顺序，比如下面例子：
+
+```go
+type Vector[T any] []T
+
+func (v Vector[T]) Dump() {
+    fmt.Printf("%#v\n", v)
+}
+
+func main() {
+    var iv = Vector[int]{1,2,3,4}
+    var sv Vector[string]
+    sv = []string{"a","b", "c", "d"}
+    iv.Dump()
+    sv.Dump()
+}
+```
+
+在这段代码中，在使用Vector[T]之前都显式用类型实参对泛型类型进行了具化，从而得到具化后的类型Vector[int]和Vector[string]。 Vector[int]的底层类型为[]int，Vector[string]的底层类型为[]string。然后我们再对具化后的类型进行操作。
 
 
-#### 类型具化（instantiation）
 
-#### 泛型类型
-
-
-
-### 4 Go泛型的性能
+### 4 Go泛型的性能🔖
 
 
 
-### 5 Go泛型的使用建议
+### 5 Go泛型的使用建议🔖
+
+Go核心团队最担心的就是“泛型被滥用”，所以Go核心团队在各种演讲场合都在努力地告诉大家Go泛型的适用场景以及应该如何使用。
 
 #### 什么情况适合使用泛型
 
@@ -6236,7 +6380,7 @@ Go泛型是Go开源以来在语法层面的最大一次变动。
 
 
 
-## 40 类型参数 🔖
+## 40 类型参数
 
 Go的泛型与其他主流编程语言的泛型不同点（[不支持的若干特性](https://github.com/golang/proposal/blob/master/design/43651-type-parameters.md#omissions)）：
 
@@ -6246,27 +6390,165 @@ Go的泛型与其他主流编程语言的泛型不同点（[不支持的若干�
 - **不支持变长的类型参数（type parameters）**；
 - …
 
-
-
 ### 40.1 例子：返回切片中值最大的元素
 
+```go
+import "fmt"
+
+func maxAny(sl []any) any {
+	if len(sl) == 0 {
+		panic("slice is empty")
+	}
+
+	max := sl[0]
+	for _, v := range sl[1:] {
+		switch v.(type) {
+		case int:
+			if v.(int) > max.(int) {
+				max = v
+			}
+		case string:
+			if v.(string) > max.(string) {
+				max = v
+			}
+		case float64:
+			if v.(float64) > max.(float64) {
+				max = v
+			}
+		}
+	}
+	return max
+}
+
+func main() {
+	i := maxAny([]any{1, 2, -4, -6, 7, 0})
+	m := i.(int)
+	fmt.Println(m)                                                 // 输出：7
+	fmt.Println(maxAny([]any{"11", "22", "44", "66", "77", "10"})) // 输出：77
+	fmt.Println(maxAny([]any{1.01, 2.02, 3.03, 5.05, 7.07, 0.01})) // 输出：7.07
+}
+```
+
+```go
+// max_test.go
+func BenchmarkMaxInt(b *testing.B) {
+    sl := []int{1, 2, 3, 4, 7, 8, 9, 0}
+    for i := 0; i < b.N; i++ {
+        maxInt(sl)
+    }
+}
+
+func BenchmarkMaxAny(b *testing.B) {
+    sl := []any{1, 2, 3, 4, 7, 8, 9, 0}
+    for i := 0; i < b.N; i++ {
+        maxAny(sl)
+    }
+}
+```
+
+```shell
+$ go test -v -bench . ./max_test.go max_any.go max_int.go
+goos: darwin
+goarch: arm64
+BenchmarkMaxInt
+BenchmarkMaxInt-8       325038272                3.453 ns/op
+BenchmarkMaxAny
+BenchmarkMaxAny-8       100000000               10.66 ns/op
+PASS
+ok      command-line-arguments  2.960s
+
+```
+
+看到，基于any(interface{})实现的maxAny其执行性能要比像maxInt这样的函数慢上数倍。
 
 
-Go语言提供的any（interface{}的别名）
+
+```go
+// max_generics.go
+type ordered interface {
+	~int | ~int32 | ~int16 | ~int64 | ~int8 |
+		~float32 | ~float64 |
+		~string |
+		~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64 | ~uintptr
+}
+
+func maxGenerics[T ordered](sl []T) T {
+	if len(sl) == 0 {
+		panic("slice is empty")
+	}
+
+	max := sl[0]
+	for _, v := range sl {
+		if v > max {
+			max = v
+		}
+	}
+	return max
+}
+
+type myString string
+
+func main() {
+	var m int = maxGenerics([]int{1, 2, -4, -6, 7, 0})
+	fmt.Println(m)                                                           // 输出：7
+	fmt.Println(maxGenerics([]string{"11", "22", "44", "66", "77", "10"}))   // 输出：77
+	fmt.Println(maxGenerics([]float64{1.01, 2.02, 3.03, 5.05, 7.07, 0.01}))  // 输出：7.07
+	fmt.Println(maxGenerics([]int8{1, 2, -4, -6, 7, 0}))                     // 输出：7
+	fmt.Println(maxGenerics([]myString{"11", "22", "44", "66", "77", "10"})) // 输出：77
+}
+```
+
+```shell
+$ go test -v -bench . ./max_test.go max_any.go max_int.go max_generics.go
+goos: darwin
+goarch: arm64
+BenchmarkMaxInt
+BenchmarkMaxInt-8               324042938                3.448 ns/op
+BenchmarkMaxAny
+BenchmarkMaxAny-8               100000000               10.72 ns/op
+BenchmarkMaxGenerics
+BenchmarkMaxGenerics-8          306493706                3.769 ns/op
+PASS
+ok      command-line-arguments  4.529s
+```
 
 
 
 ### 40.2 类型参数（type parameters）
 
-#### 泛型函数
+**Go泛型方案的实质是对类型参数（type parameter）的支持**，包括：
 
-调用泛型函数
-泛型函数实例化（instantiation）
+- 泛型函数（generic function）：带有类型参数的函数；
+- 泛型类型（generic type）：带有类型参数的自定义类型；
+- 泛型方法（generic method）：泛型类型的方法。
 
-#### 泛型类型
+#### 1️⃣ 泛型函数
 
-使用泛型类型
-泛型方法
+![](images/46bf5dc6778b44abacb7c3e9d3aa57d9.jpg)
+
+##### 调用泛型函数
+
+![](images/e19fcdaa14d3442da3aa8b5d77069c9e.jpg)
+
+##### 泛型函数实例化（instantiation）
+
+![](images/bf8571f4e2ce48a782411aaf0e5cf022.jpg)
+
+#### 2️⃣ 泛型类型
+
+![](images/bd4292c1f4ec4288ab8a385e51a7811b.jpg)
+
+##### 使用泛型类型
+
+
+
+##### 泛型方法
+
+Go类型可以拥有自己的方法（method），泛型类型也不例外，为泛型类型定义的方法称为**泛型方法（generic method）**。
+
+
+
+
 
 
 
@@ -6278,19 +6560,41 @@ Go语言提供的any（interface{}的别名）
 
 ![](images/image-20240721151712110.png)
 
-### 最宽松的约束：any
+### 41.1 最宽松的约束：any
 
 
 
-### 支持比较操作的内置约束：comparable
+### 41.2 支持比较操作的内置约束：comparable
 
 
 
-### 自定义约束
+### 41.3 自定义约束
+
+Go泛型最终决定使用interface语法来定义约束。这样一来，**凡是接口类型均可作为类型参数的约束**。
 
 
 
-### 类型集合（type set）
+![](images/b31aba8af0c9439c8a530128ae976c3f.jpg)
+
+
+
+```go
+type Ia interface {
+	int | string  // 仅代表int和string
+}
+
+type Ib interface {
+	~int | ~string  // 代表以int和string为底层类型的所有类型
+}
+```
+
+
+
+![](images/91186776da4d4c6dac2e12153ff7b082.jpg)
+
+
+
+### 41.4 类型集合（type set）
 
 ![](images/image-20240721152001159.png)
 
@@ -6298,21 +6602,52 @@ Go语言提供的any（interface{}的别名）
 
 ![](images/image-20240721152035052.png)
 
-### 简化版的约束形式
+### 41.5 简化版的约束形式
+
+```go
+type I interface { // 独立于泛型函数外面定义
+    ~int | ~string
+}
+
+func doSomething1[T I](t T)
+func doSomething2[T interface{~int | ~string}](t T) // 以接口类型字面值作为约束
+```
+
+```go
+func doSomething2[T ~int | ~string](t T) // 简化版的约束形式
+```
 
 
 
-### 约束的类型推断
+一般形式来表述：
+
+```go
+func doSomething[T interface {T1 | T2 | ... | Tn}](t T)
+
+等价于下面简化版的约束形式：
+
+func doSomething[T T1 | T2 | ... | Tn](t T) 
+```
 
 
 
-## 42 明确使用时机
+### 41.6 约束的类型推断
+
+
+
+## 42 明确使用时机🔖
+
+Go语言开发人员都有义务去正确、适当的使用泛型，而不是滥用或利用泛型炫技。
 
 ### 42.1 何时适合使用泛型？
 
 #### 场景一：编写通用数据结构时
 
+
+
 #### 场景二：函数操作的是Go原生的容器类型时
+
+
 
 #### 场景三：不同类型实现一些方法的逻辑相同时
 
@@ -6322,11 +6657,54 @@ Go语言提供的any（interface{}的别名）
 
 #### Stenciling方案
 
+![](images/bf7591aebdbd4731aaa2097cc89efbb6.jpg)
+
 #### Dictionaries方案
+
+![](images/a19c9ff543a249d488a915c0ab056fab.jpg)
+
+
 
 #### Go最终采用的方案：GC Shape Stenciling方案
 
+![](images/cf7fb42e6c9a4b099ea40ebd4577f06d.jpg)
 
+```go
+// gcshape.go
+func f[T any](t T) T {
+    var zero T
+    return zero
+}
+
+type MyInt int
+
+func main() {
+    f[int](5)
+    f[MyInt](15)
+    f[int64](6)
+    f[uint64](7)
+    f[int32](8)
+    f[rune](18)
+    f[uint32](9)
+    f[float64](3.14)
+    f[string]("golang")
+
+    var a int = 5
+    f[*int](&a)
+    var b int32 = 15
+    f[*int32](&b)
+    var c float64 = 8.88
+    f[*float64](&c)
+    var s string = "hello"
+    f[*string](&s)
+}
+```
+
+
+
+
+
+![](images/1a0d0ac6ef0842668e5355742a69375c.jpg)
 
 ### 42.3 泛型对执行效率的影响
 

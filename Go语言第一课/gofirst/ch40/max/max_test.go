@@ -15,3 +15,10 @@ func BenchmarkMaxAny(b *testing.B) {
 		maxAny(sl)
 	}
 }
+
+func BenchmarkMaxGenerics(b *testing.B) {
+	sl := []int{1, 2, 3, 4, 7, 8, 9, 0}
+	for i := 0; i < b.N; i++ {
+		maxGenerics(sl)
+	}
+}

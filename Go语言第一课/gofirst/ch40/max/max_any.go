@@ -1,7 +1,5 @@
 package main
 
-import "fmt"
-
 func maxAny(sl []any) any {
 	if len(sl) == 0 {
 		panic("slice is empty")
@@ -27,10 +25,10 @@ func maxAny(sl []any) any {
 	return max
 }
 
-func main() {
-	i := maxAny([]any{1, 2, -4, -6, 7, 0})
-	m := i.(int)
-	fmt.Println(m)                                                 // 输出：7
-	fmt.Println(maxAny([]any{"11", "22", "44", "66", "77", "10"})) // 输出：77
-	fmt.Println(maxAny([]any{1.01, 2.02, 3.03, 5.05, 7.07, 0.01})) // 输出：7.07
-}
+//func main() {
+//	i := maxAny([]any{1, 2, -4, -6, 7, 0})
+//	m := i.(int)
+//	fmt.Println(m)                                                 // 输出：7
+//	fmt.Println(maxAny([]any{"11", "22", "44", "66", "77", "10"})) // 输出：77
+//	fmt.Println(maxAny([]any{1.01, 2.02, 3.03, 5.05, 7.07, 0.01})) // 输出：7.07
+//}
