@@ -21,3 +21,7 @@ func main() {
 	nums := []int{3, 2, 1}
 	sum(nums...)
 }
+
+func s2(n1 string, n2 ...int) {
+
+}
