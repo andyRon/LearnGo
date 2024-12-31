@@ -3275,9 +3275,81 @@ func main() {
 
 ### 19.1 for语句的经典使用形式
 
+![](images/image-20241225161246544.png)
 
+1️⃣ **循环前置语句**。**仅会被执行一次**
+
+2️⃣ **条件判断表达式**
+
+3️⃣ **循环体**
+
+4️⃣ **循环后置语句**
 
 ### 19.2 for range
+
+#### 切片
+
+```go
+for i, v := range sl {
+    fmt.Printf("sl[%d] = %d\n", i, v)
+}
+```
+
+这里的i和v对应的是经典for语句形式中循环前置语句的循环变量，它们的初值分别为切片sl的第一个元素的下标值和元素值。
+
+三种变种：
+
+```go
+for i := range sl {
+	// ... 
+}
+
+for _, v := range sl {
+	// ... 
+}
+
+for _, _ = range sl {
+	// ... 
+}
+```
+
+#### string
+
+```go
+var s = "中国人"
+for i, v := range s {
+    fmt.Printf("%d %s 0x%x\n", i, string(v), v)
+}
+```
+
+```
+0 中 0x4e2d
+3 国 0x56fd
+6 人 0x4eba
+```
+
+for range对于string类型来说，**每次循环得到的v值是一个Unicode字符码点**，也就是rune类型值，而不是一个字节，返回的第一个值i为**该Unicode字符码点的内存编码（UTF-8）的第一个字节在字符串内存序列中的位置**。
+
+> for与for range，对string类型进行循环操作的语义是不同的。
+
+
+
+#### map
+
+在Go语言中，**对map进行循环操作，for range是唯一的方法**。
+
+
+
+#### channel
+
+```go
+var c = make(chan int)
+for v := range c {
+   // ... 
+}
+```
+
+在这个例子中，for range每次从channel中读取一个元素后，会把它赋值给循环变量v，并进入循环体。当channel中没有数据可读的时候，for range循环会阻塞在对channel的读操作上。直到channel关闭时，for range循环才会结束，这也是for range循环与channel配合时隐含的循环判断条件。
 
 
 
@@ -3314,9 +3386,15 @@ loop:
 
 ### 19.5 for语句的常见“坑”与避坑方法 🔖
 
+for range这个语法糖提高了Go的表达能力，同时也可能带入一些问题。
+
 #### 1️⃣循环变量的重用
 
+
+
 #### 2️⃣参与循环的是range表达式的副本
+
+
 
 #### 3️⃣遍历map中元素的随机性
 
@@ -4114,11 +4192,11 @@ defer不仅可以用来**捕捉和恢复panic**，还能让函数变得**更简�
 
 ### 24.1 认识Go方法
 
-Go引入方法这一元素，并不是要支持面向对象编程范式，而是Go践行组合设计哲学的一种实现层面的需要。
+Go引入方法这一元素，并不是要支持面向对象编程范式，而是Go践行==组合设计哲学==的一种实现层面的需要。
 
 ![](images/image-20240704132750133.png)
 
-**这个`receiver`参数也是方法与类型之间的纽带，也是方法与函数的最大不同。**
+**这个`receiver`参数也是==方法与类型之间的纽带==，也是方法与函数的最大不同。**
 
 Go中的方法必须是归属于一个类型的，而receiver参数的类型就是这个方法归属的类型，或者说这个方法就是这个类型的一个方法。
 
@@ -4142,7 +4220,7 @@ func (t *T或T) MethodName(参数列表) (返回值列表) {
 
 如果在方法体中，没有用到receiver参数，也可以省略receiver的参数名。
 
-**receiver参数的基类型本身不能为指针类型或接口类型。**
+**receiver参数的<u>基类型本身不能为指针类型或接口类型</u>。**
 
 ```go
 type MyInt *int
@@ -4175,31 +4253,224 @@ func (s http.Server) Foo() { // 编译器报错：cannot define new methods on n
 } 
 ```
 
-🔖
 
-### 24.2 方法的本质是什么？🔖
+
+```go
+type T struct{}
+
+func (t T) M(n int) {
+}
+
+func main() {
+	var t T
+	t.M(1) // 通过类型T的变量实例调用方法M
+
+	p := &T{}
+	p.M(2) // 通过类型*T的变量实例调用方法M
+}
+```
+
+### 24.2 方法的本质是什么？
+
+```go
+type T struct { 
+    a int
+}
+
+func (t T) Get() int {  
+    return t.a 
+}
+
+func (t *T) Set(a int) int { 
+    t.a = a 
+    return t.a 
+}
+```
+
+> C++中的对象在调用方法时，编译器会自动传入指向对象自身的this指针作为方法的第一个参数。
+>
+> Go方法中的原理也是相似的，只不过是将receiver参数以第一个参数的身份并入到方法的参数列表中。上面的方法可以等价转换为普通函数：
+>
+> ```go
+> // 类型T的方法Get的等价函数
+> func Get(t T) int {  
+>     return t.a 
+> }
+> 
+> // 类型*T的方法Set的等价函数
+> func Set(t *T, a int) int { 
+>     t.a = a 
+>     return t.a 
+> }
+> ```
+>
+> 这种等价转换是由Go编译器在编译和生成代码时自动完成的。
+
+
+
+==方法表达式（Method Expression）== 🔖
+
+
 
 Go语言中的方法的本质就是，**一个以方法的receiver参数作为第一个参数的普通函数**。
 
-巧解难题
+```go
+func main() {
+    var t T
+    f1 := (*T).Set // f1的类型，也是*T类型Set方法的类型：func (t *T, int)int
+    f2 := T.Get    // f2的类型，也是T类型Get方法的类型：func(t T)int
+    fmt.Printf("the type of f1 is %T\n", f1) // the type of f1 is func(*main.T, int) int
+    fmt.Printf("the type of f2 is %T\n", f2) // the type of f2 is func(main.T) int
+    f1(&t, 3)
+    fmt.Println(f2(t)) // 3
+}    
+```
 
 
 
-## 25 方法：方法集合与如何选择receiver类型？🔖
+
+
+### 巧解难题🔖
+
+
+
+## 25 方法：方法集合与如何选择receiver类型？
 
 由于在Go语言中，**方法本质上就是函数**，所以之前关于函数设计的内容对方法也同样适用，比如错误处理设计、针对异常的处理策略、使用defer提升简洁性，等等。
 
 ### 25.1 receiver参数类型对Go方法的影响
 
+```go
+func (t T) M1() <=> F1(t T)
+func (t *T) M2() <=> F2(t *T)
+```
+
+- 首先，当receiver参数的类型为T时：值拷贝传递
+- 第二，当receiver参数的类型为*T时：传递的是T类型实例的地址
+
 ### 25.2 选择receiver参数类型的第一个原则
 
-如果Go方法要把对receiver参数代表的类型实例的修改，反映到原类型实例上，那么应该选择*T作为receiver参数的类型。
+**如果Go方法要把对receiver参数代表的类型实例的修改，反映到原类型实例上，那么应该选择*T作为receiver参数的类型**。
 
 ### 25.3 选择receiver参数类型的第二个原则
 
+如果receiver参数类型的size较大，以值拷贝形式传入就会导致较大的性能开销，这时选择*T作为receiver类型可能更好些。
+
 ### 25.4 方法集合
 
-### 25.5 选择receiver参数类型的第三个原则
+==方法集合（Method Set）==
+
+```go
+      type Interface interface {
+    M1()
+    M2()
+}
+
+type T struct{}
+
+func (t T) M1()  {}
+func (t *T) M2() {}
+
+func main() {
+    var t T
+    var pt *T
+    var i Interface
+
+    i = pt
+    i = t // cannot use t (type T) as type Interface in assignment: T does not implement Interface (M2 method has pointer receiver)
+}
+```
+
+
+
+
+
+**方法集合也是用来判断一个类型是否实现了某接口类型的唯一手段**，可以说，“**方法集合决定了接口实现**”。
+
+Go中任何一个类型都有属于自己的方法集合:
+
+- 以int、*int为代表的Go原生类型由于没有定义方法，所以它们的方法集合都是空的，称其**拥有空方法集合**。
+
+- 接口类型相对特殊，它只会列出代表接口的方法列表，不会具体定义某个方法，它的方法集合就是它的**方法列表中的所有方法**。
+
+```go
+package main
+
+import (
+	"fmt"
+	"reflect"
+)
+
+type T struct{}
+
+func (T) M1() {}
+func (T) M2() {}
+
+func (*T) M3() {}
+func (*T) M4() {}
+
+// 查看一个非接口类型的方法集合
+func dumpMethodSet(i interface{}) {
+	dynTyp := reflect.TypeOf(i)
+
+	if dynTyp == nil {
+		fmt.Println("there is no dynamic type\n")
+		return
+	}
+
+	n := dynTyp.NumMethod()
+	if n == 0 {
+		fmt.Printf("%s's method set is empty!\n", dynTyp)
+		return
+	}
+
+	fmt.Printf("%s's method set:\n", dynTyp)
+	for j := 0; j < n; j++ {
+		fmt.Println("-", dynTyp.Method(j).Name)
+	}
+	fmt.Printf("\n")
+}
+
+func main() {
+	var n int
+	dumpMethodSet(n)
+	dumpMethodSet(&n)
+
+	var t T
+	dumpMethodSet(t)
+	dumpMethodSet(&t)
+}
+```
+
+结果：
+
+```
+int's method set is empty!
+*int's method set is empty!
+main.T's method set:
+- M1
+- M2
+
+*main.T's method set:
+- M1
+- M2
+- M3
+- M4
+```
+
+- Go语言规定，`*T`类型的方法集合包含所有以`*T`为receiver参数类型的方法，以及所有以T为receiver参数类型的方法。
+
+所谓**的方法集合决定接口实现**的含义就是：如果某类型T的方法集合与某接口类型的方法集合相同，或者类型T的方法集合是接口类型I方法集合的超集，那么我们就说这个类型T实现了接口I。
+
+### 25.5 选择receiver参数类型的第三个原则🔖
+
+第三个原则的选择依据就是**T类型是否需要实现某个接口**，也就是是否存在将T类型的变量赋值给某接口类型变量的情况。
+
+如果**T类型需要实现某个接口**，那我们就要使用T作为receiver参数的类型，来满足接口类型方法集合中的所有方法。
+
+如果T不需要实现某一接口，但`*T`需要实现该接口，那么根据方法集合概念，`*T`的方法集合是包含T的方法集合的，这样我们在确定Go方法的receiver的类型时，参考原则一和原则二就可以了。
+
+如果说前面的两个原则更多聚焦于类型内部，从单个方法的实现层面考虑，那么这第三个原则则是更多从全局的设计层面考虑，聚焦于这个类型与接口类型间的耦合关系。
 
 
 

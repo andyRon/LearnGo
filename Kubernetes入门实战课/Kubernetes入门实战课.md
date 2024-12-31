@@ -5,6 +5,8 @@ https://time.geekbang.org/column/intro/100114501
 
 发布时间：2022
 
+配套的学习项目：https://github.com/chronolaw/k8s_study
+
 ## 前言
 
 现在Kubernetes已经没有了实际意义上的竞争对手，它的地位就如同Linux一样，成为了事实上的云原生操作系统，是构建现代应用的基石。
