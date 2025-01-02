@@ -4486,7 +4486,7 @@ Go语言不支持经典面向对象的编程范式与语法元素，所以我们
 
 ==类型嵌入（Type Embedding）==指的就是在一个类型的定义中嵌入了其他类型。Go语言支持两种类型嵌入，分别是==接口类型的类型嵌入==和==结构体类型的类型嵌入==。
 
-#### 接口类型的类型嵌入
+#### 1️⃣接口类型的类型嵌入
 
 ```go
 type E interface {
@@ -4512,7 +4512,51 @@ type I interface {
 
 接口类型嵌入的语义就是新接口类型（如接口类型I）将嵌入的接口类型（如接口类型E）的方法集合，并入到自己的方法集合中。
 
-#### 结构体类型的类型嵌入
+Go中的接口类型中只包含少量方法，并且常常只是一个方法。通过在接口类型中嵌入其他接口类型可以实现接口的组合，这也是**Go语言中基于已有接口类型构建新接口类型的惯用法。**
+
+Go标准库有很多这种组合方式，比如，io包的ReadWriter、ReadWriteCloser等接口类型就是通过嵌入Reader、Writer或Closer三个基本的接口类型组合而成的：
+
+```go
+// $GOROOT/src/io/io.go
+
+type Reader interface {
+    Read(p []byte) (n int, err error)
+}
+
+type Writer interface {
+    Write(p []byte) (n int, err error)
+}
+
+type Closer interface {
+    Close() error
+}
+
+
+type ReadWriter interface {
+    Reader
+    Writer
+}
+
+type ReadCloser interface {
+    Reader
+    Closer
+}
+
+type WriteCloser interface {
+    Writer
+    Closer
+}
+
+type ReadWriteCloser interface {
+    Reader
+    Writer
+    Closer
+}    
+```
+
+
+
+#### 2️⃣结构体类型的类型嵌入
 
 ```go
 type T1 int
@@ -4534,20 +4578,185 @@ type S1 struct {
 }
 ```
 
-结构体S1定义中有三个“非常规形式”的标识符，分别是T1、t2和I，它们**既代表字段的名字，也代表字段的类型**。
+结构体S1定义中有三个“非常规形式”的标识符，分别是`T1`、`t2`和`I`，它们**既代表字段的名字，也代表字段的类型**。
 
-这种以某个类型名、类型的指针类型名或接口类型名，直接作为结构体字段的方式就叫做结**构体的类型嵌入**，这些字段也被叫做**嵌入字段**（Embedded Field）。
+- 标识符T1表示字段名为T1，它的类型为自定义类型T1；
+- 标识符t2表示字段名为t2，它的类型为自定义结构体类型t2的指针类型；
+- 标识符I表示字段名为I，它的类型为接口类型I。
 
-🔖
+这种以某个==类型名==、==类型的指针类型名==或==接口类型名==，直接作为结构体字段的方式就叫做结**==构体的类型嵌入==**，这些字段也被叫做**==嵌入字段==**（Embedded Field）。
 
-#### “实现继承”的原理
+```go
+type MyInt int
+
+func (n *MyInt) Add(m int) {
+    *n = *n + MyInt(m)
+}
+
+type t struct {
+    a int
+    b int
+}
+
+type S struct {
+    *MyInt
+    t
+    io.Reader
+    s string
+    n int
+}
+
+func main() {
+    m := MyInt(17)
+    r := strings.NewReader("hello, go")
+    s := S{
+        MyInt: &m,
+        t: t{
+            a: 1,
+            b: 2,
+        },
+        Reader: r,
+        s:      "demo",
+    }
+
+    var sl = make([]byte, len("hello, go"))
+    s.Reader.Read(sl)
+    fmt.Println(string(sl)) // hello, go
+    s.MyInt.Add(5)
+    fmt.Println(*(s.MyInt)) // 22
+}   
+```
+
+> 嵌入字段的可见性与嵌入字段的类型的可见性是一致的。如果嵌入类型的名字是首字母大写的，那么也就说明这个嵌入字段是可导出的。
+
+> Go语言规定如果结构体使用从其他包导入的类型作为嵌入字段，比如pkg.T，那么这个嵌入字段的字段名就是T，代表的类型为pkg.T。所以上面的S类型中对应字段名称是`Reader`，代表的类型是`io.Reader`。
+
+嵌入字段的用法与普通字段不同点：
+
+- 和Go方法的receiver的基类型一样，嵌入字段类型的底层类型不能为指针类型。
+- 嵌入字段的名字在结构体定义也必须是唯一的。
+
+
+
+#### 3️⃣“实现继承”的原理
+
+部分变化：
+
+```go
+var sl = make([]byte, len("hello, go"))
+s.Read(sl) 
+fmt.Println(string(sl))
+s.Add(5) 
+fmt.Println(*(s.MyInt))
+```
+
+像是：**Read方法与Add方法就是类型S方法集合中的方法**。
+
+其实，这两个方法就来自结构体类型S的两个嵌入字段Reader和MyInt。**结构体类型S“继承”了Reader字段的方法Read的实现，也“继承”了*MyInt的Add方法的实现**。
+
+- 当我们通过结构体类型S的变量s调用Read方法时，Go发现结构体类型S自身并没有定义Read方法，于是Go会查看S的嵌入字段对应的类型是否定义了Read方法。这个时候，Reader字段就被找了出来，之后s.Read的调用就被转换为s.Reader.Read调用。
+- 这样一来，嵌入字段Reader的Read方法就被提升为S的方法，放入了类型S的方法集合。同理`*MyInt`的Add方法也被提升为S的方法而放入S的方法集合。从外部来看，这种嵌入字段的方法的提升就给了我们一种结构体类型S“继承”了io.Reader类型Read方法的实现，以及`*MyInt`类型Add方法的实现的错觉。
+
+类型嵌入这种看似“继承”的机制，实际上是一种组合的思想。更具体点，它是一种组合中的**代理（delegate）模式**，如下图所示：
+
+![](images/image-20241231115101611.png)
+
+S只是一个代理（delegate），对外它提供了它可以代理的所有方法，如例子中的Read和Add方法。当外界发起对S的Read方法的调用后，S将该调用委派给它内部的Reader实例来实际执行Read方法。
+
+
 
 ### 26.2 类型嵌入与方法集合
 
-- 结构体类型中嵌入接口类型
-- 结构体类型中嵌入结构体类型
+#### 结构体类型中嵌入接口类型
 
-### 26.3 类型与alias类型的方法集合
+```go
+type I interface {
+    M1()
+    M2()
+}
+
+type T struct {
+    I
+}
+
+func (T) M3() {}
+
+func main() {
+    var t T
+    var p *T
+    dumpMethodSet(t)
+    dumpMethodSet(p)
+}
+```
+
+```go
+main.T's method set:
+- M1
+- M2
+- M3
+
+*main.T's method set:
+- M1
+- M2
+- M3
+```
+
+**结构体类型的方法集合，包含嵌入的接口类型的方法集合。**
+
+🔖
+
+#### 结构体类型中嵌入结构体类型
+
+```go
+type T1 struct{}
+
+func (T1) T1M1()   { println("T1's M1") }
+func (*T1) PT1M2() { println("PT1's M2") }
+
+type T2 struct{}
+
+func (T2) T2M1()   { println("T2's M1") }
+func (*T2) PT2M2() { println("PT2's M2") }
+
+type T struct {
+    T1
+    *T2
+}
+
+func main() {
+    t := T{
+        T1: T1{},
+        T2: &T2{},
+    }
+
+    dumpMethodSet(t)
+    dumpMethodSet(&t)
+}
+```
+
+输出结果：
+
+```
+main.T's method set:
+- PT2M2
+- T1M1
+- T2M1
+
+*main.T's method set:
+- PT1M2
+- PT2M2
+- T1M1
+- T2M1
+```
+
+- 类型T的方法集合 = T1的方法集合 + `*T2`的方法集合
+- 类型`*T`的方法集合 = `*T1`的方法集合 + `*T2`的方法集合
+
+
+
+
+
+### 26.3 defined类型与alias类型的方法集合
 
 Go语言中，凡通过类型声明语法声明的类型都被称为==defined类型==。
 
@@ -4561,9 +4770,11 @@ type NT T // 基于已存在的类型T创建新的defined类型NT
 type NI I // 基于已存在的接口类型I创建新defined接口类型NI
 ```
 
+🔖
 
 
 
+> 无论原类型是接口类型还是非接口类型，类型别名都与原类型拥有完全相同的方法集合。
 
 ## 27 即学即练：跟踪函数调用链，理解代码更直观
 
@@ -4620,11 +4831,17 @@ exit:  main
 
 ### 27.2 自动获取所跟踪函数的函数名
 
+
+
 ### 27.3 增加Goroutine标识 🔖
+
+
 
 ### 27.4 让输出的跟踪信息更具层次感 🔖
 
 对于程序员来说，缩进是最能体现出“层次感”的方法。
+
+
 
 ### 27.5 利用代码生成自动注入Trace函数 🔖
 
@@ -4976,8 +5193,6 @@ func main() {
     fmt.Println("ok")
 }
 ```
-
-
 
 
 
@@ -7227,7 +7442,7 @@ func main() {
 
 
 
-## Go语言的GC实现
+## 46 Go语言的GC实现
 
 
 
@@ -7244,3 +7459,6 @@ func main() {
 ![](images/image-20240704194647473.png)
 
 字节的开源组织：https://github.com/cloudwego
+
+
+
