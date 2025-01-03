@@ -5735,7 +5735,7 @@ func (l *LimitedReader) Read(p []byte) (n int, err error) {
 
 
 
-## 31 并发：Go的并发方案实现方案是怎样的？
+## 31 并发：Go的并发方案实现方案是怎样的？❤️
 
 Go的设计者将面向多核、**原生支持并发**作为了Go语言的设计目标之一，并将面向并发作为Go的设计哲学。
 
@@ -5767,9 +5767,9 @@ Go的设计者将面向多核、**原生支持并发**作为了Go语言的设计
 
 **粗略看起来，多进程应用与单进程应用相比并没有什么质的提升。那我们为什么还要将应用设计为多进程呢？**
 
-这更多是从**应用的结构**角度去考虑的，多进程应用由于**将功能职责做了划分**，并指定专门的模块来负责，所以从结构上来看，要比单进程更为清晰简洁，可读性与可维护性也更好。**这种将程序分成多个可独立执行的部分的结构化程序的设计方法，就是==并发设计==**。采用了并发设计的应用也可以看成是**一组独立执行的模块的组合**。
+这更多是从**应用的结构**角度去考虑的，多进程应用由于**将==功能职责==做了划分**，并指定专门的模块来负责，所以从结构上来看，要比单进程更为清晰简洁，可读性与可维护性也更好。**这种将程序分成多个可独立执行的部分的结构化程序的设计方法，就是==并发设计==**。采用了并发设计的应用也可以看成是**一组独立执行的模块的组合**。
 
-不过，进程并不适合用于承载采用了并发设计的应用的模块执行流。因为进程是操作系统中资源拥有的基本单位，它不仅包含应用的代码和数据，还有系统级的资源，比如文件描述符、内存地址空间等等。进程的“包袱”太重，这导致它的创建、切换与撤销的代价都很大。
+不过，进程并不适合用于承载采用了并发设计的应用的模块执行流。因为进程是操作系统中资源拥有的基本单位，它不仅包含应用的代码和数据，还有**系统级的资源**，比如**文件描述符、内存地址空间**等等。进程的“包袱”太重，这导致它的创建、切换与撤销的代价都很大。
 
 于是线程便走入了人们的视野，==线程==就是**运行于进程上下文中的更轻量级的执行流**。同时随着处理器技术的发展，多核处理器硬件成为了主流，这让真正的并行成为了可能，于是主流的应用设计模型变成了这样：
 
@@ -5781,25 +5781,23 @@ Go的设计者将面向多核、**原生支持并发**作为了Go语言的设计
 
 > Rob Pike：**并发不是并行，并发关乎结构，并行关乎执行**。
 
-总的来说，并发是**在应用设计与实现阶段要考虑的问题**。并发考虑的是如何将应用划分为多个互相配合的、可独立执行的模块的问题。采用并发设计的程序并不一定是并行执行的。
+总的来说，并发是**在==应用设计与实现阶段==要考虑的问题**。并发考虑的是如何将应用划分为多个互相配合的、可独立执行的模块的问题。采用并发设计的程序并不一定是并行执行的。
 
 在不满足并行必要条件的情况下（也就是仅有一个单核CPU的情况下），即便是采用并发设计的程序，依旧不可以并行执行。而在满足并行必要条件的情况下，采用并发设计的程序是可以并行执行的。而那些没有采用并发设计的应用程序，除非是启动多个程序实例，否则是无法并行执行的。
 
-在多核处理器成为主流的时代，即使采用并发设计的应用程序以单实例的方式运行，其中的每个内部模块也都是运行于一个单独的线程中的，多核资源也可以得到充分利用。而且，**并发让并行变得更加容易**，采用并发设计的应用可以将负载自然扩展到各个CPU核上，从而提升处理器的利用效率。
+在多核处理器成为主流的时代，即使采用并发设计的应用程序以单实例的方式运行，其中的每个内部模块也都是运行于一个单独的线程中的，多核资源也可以得到充分利用。而且，**==并发让并行变得更加容易==**，采用并发设计的应用可以将负载自然扩展到各个CPU核上，从而提升处理器的利用效率。
 
-
-
-在传统编程语言（如C、C++等）中，基于**多线程模型**的应用设计就是一种典型的并发程序设计。但传统编程语言并非面向并发而生，没有对并发设计提供过多的帮助。并且，这些语言多以操作系统线程作为承载分解后的代码片段（模块）的执行单元，由操作系统执行调度。传统支持并发的方式的不足：
+在传统编程语言（如C、C++等）中，基于**多线程模型**的应用设计就是一种典型的并发程序设计。但传统编程语言并非面向并发而生，没有对并发设计提供过多的帮助。并且，这些语言<u>多以操作系统线程作为承载分解后的代码片段（模块）的执行单元</u>，由操作系统执行调度。传统支持并发的方式的不足：
 
 - 首先就是复杂。
 
-  创建容易**退出难**。如果你做过C/C++编程，那你肯定知道，如果我们要利用libpthread库中提供的API创建一个线程，虽然要传入的参数个数不少，但好歹还是可以接受的。但一旦涉及线程的退出，就要考虑新创建的线程是否要与主线程分离（detach），还是需要主线程等待子线程终止（join）并获取其终止状态？又或者是否需要在新线程中设置取消点（cancel point）来保证被主线程取消（cancel）的时候能顺利退出。
+  **创建容易==退出难==**。如果你做过C/C++编程，那你肯定知道，如果我们要利用libpthread库中提供的API创建一个线程，虽然要传入的参数个数不少，但好歹还是可以接受的。但一旦涉及线程的退出，就要考虑**新创建的线程是否要与主线程分离**（detach），还是需要**主线程等待子线程终止（join）并获取其终止状态**？又或者是否需要在**新线程中设置取消点（cancel point）来保证被主线程取消（cancel）的时候能顺利退出**。
 
-  而且，并发执行单元间的通信困难且易错。多个线程之间的通信虽然有多种机制可选，但用起来也是相当复杂。并且一旦涉及共享内存，就会用到各种锁互斥机制，死锁便成为家常便饭。另外，线程栈大小也需要设定，开发人员需要选择使用默认的，还是自定义设置
+  而且，并发执行单元间的==通信困难且易错==。多个线程之间的通信虽然有多种机制可选，但用起来也是相当复杂。并且一旦涉及共享内存，就会用到各种锁互斥机制，死锁便成为家常便饭。另外，线程栈大小也需要设定，开发人员需要选择使用默认的，还是自定义设置。
 
-- 第二就是难于规模化（scale）。每个线程占用的资源不小之，操作系统调度切换线程的代价也不小。
+- 第二就是难于规模化（scale）。每个线程占用的资源不小，操作系统调度切换线程的代价也不小。
 
-  对于很多网络服务程序来说，由于不能大量创建线程，只能选择在少量线程里做网络多路复用的方案，也就是使用epoll/kqueue/IoCompletionPort这套机制，即便有像[libevent](https://github.com/libevent/libevent)和[libev](http://software.schmorp.de/pkg/libev.html)这样的第三方库帮忙，写起这样的程序也是很不容易的，存在大量钩子回调，给开发人员带来不小的心智负担。
+  对于很多网络服务程序来说，由于不能大量创建线程，只能选择在少量线程里做网络多路复用的方案，也就是使用epoll/kqueue/IoCompletionPort这套机制，即便有像[libevent](https://github.com/libevent/libevent)和[libev](http://software.schmorp.de/pkg/libev.html)这样的第三方库帮忙，写起这样的程序也是很不容易的，存在大量**钩子回调**，给开发人员带来不小的**心智负担**。
 
 
 
@@ -5809,9 +5807,9 @@ Go并没有使用操作系统线程作为承载分解后的代码片段（模块
 
 相比传统操作系统线程来说，goroutine的优势主要是：
 
-- 资源占用小，每个goroutine的**初始栈**大小仅为2k；
+- 资源占用小，每个goroutine的**初始栈**大小仅为==2k==；
 - 由Go运行时而不是操作系统调度，goroutine上下文切换在用户层完成，开销更小；
-- 在**语言层**面而不是通过标准库提供。goroutine由`go`关键字创建，**一退出就会被回收或销毁**，开发体验更佳；
+- 在**==语言层==**面而不是通过标准库提供。goroutine由`go`关键字创建，**一退出就会被回收或销毁**，开发体验更佳；
 - 语言内置`channel`作为goroutine间通信原语，为并发设计提供了强大支撑。
 
 通过并发设计的Go应用可以更好地、更自然地适应**规模化（scale）**。
@@ -5847,7 +5845,7 @@ go c.serve(connCtx)
 
 #### goroutine间的通信
 
-传统的编程语言（比如：C++、Java、Python等）并非面向并发而生的，所以他们面对并发的逻辑多是**基于操作系统的线程**。并发的执行单元（线程）之间的通信，利用的也是操作系统提供的**线程或进程间通信**的原语，比如：**共享内存、信号（signal）、管道（pipe）、消息队列、套接字（socket）**等。
+传统的编程语言（比如：C++、Java、Python等）并非==面向并发==而生的，所以他们面对并发的逻辑多是**基于操作系统的线程**。并发的执行单元（线程）之间的通信，利用的也是操作系统提供的**线程或进程间通信**的原语，比如：**共享内存、信号（signal）、管道（pipe）、消息队列、套接字（socket）**等。
 
 在这些通信原语中，使用最多、最广泛的（也是最高效的）是结合了线程同步原语（比如：锁以及更为低级的原子操作）的共享内存方式，因此，我们可以说传统语言的并发模型是**基于对内存的共享的**。
 
@@ -5861,7 +5859,7 @@ CSP模型旨在简化并发程序的编写，让并发程序的编写与编写�
 
 因此，在Tony Hoare眼中，**一个符合CSP模型的并发程序应该是一组通过输入输出原语连接起来的P的集合**。从这个角度来看，CSP理论不仅是一个并发参考模型，也是一种**并发程序的程序组织方法**。它的组合思想与Go的设计哲学不谋而合。
 
-Tony Hoare的CSP理论中的P，也就是“Process（进程）”，是一个抽象概念，它代表**任何顺序处理逻辑的封装**，它获取输入数据（或从其他P的输出获取），并生产出可以被其他P消费的输出数据。CSP通信模型的示意图：
+Tony Hoare的CSP理论中的P，也就是“Process（进程）”，是一个抽象概念，它代表**任何顺序==处理逻辑==的封装**，它获取输入数据（或从其他P的输出获取），并生产出可以被其他P消费的输出数据。CSP通信模型的示意图：
 
 ![](images/image-20240711235319311.png)
 
@@ -5889,21 +5887,20 @@ func main() {
 }
 ```
 
-在main goroutine与子goroutine之间建立了一个元素类型为error的channel，子goroutine退出时，会将它执行的函数的错误返回值写入这个channel，main goroutine可以通过读取channel的值来获取子goroutine的退出状态。
+<u>在main goroutine与子goroutine之间建立了一个元素类型为error的channel，子goroutine退出时，会将它执行的函数的错误返回值写入这个channel，main goroutine可以通过读取channel的值来获取子goroutine的退出状态。</u>
 
-虽然CSP模型已经成为Go语言支持的主流并发模型，但Go也支持传统的、基于共享内存的并发模型，并提供了基本的低级别同步原语（主要是sync包中的互斥锁、条件变量、读写锁、原子操作等）。
+虽然CSP模型已经成为Go语言支持的主流并发模型，但Go也支持传统的、基于共享内存的并发模型，并提供了基本的低级别同步原语（主要是`sync`包中的互斥锁、条件变量、读写锁、原子操作等）。
 
-**Go始终推荐以CSP并发模型风格构建并发程序**。不过，对于局部情况，比如涉及性能敏感的区域或需要保护的结构体数据时，我们可以使用更为高效的低级同步原语（如mutex），保证goroutine对数据的同步访问。
+**Go始终推荐以CSP并发模型风格构建并发程序**。不过，对于局部情况，比如涉及**性能敏感的区域**或**需要保护的结构体数据**时，我们可以使用更为高效的低级同步原语（如`mutex`），保证goroutine对数据的同步访问。
 
-思考
+### 思考
 
-> goroutine作为Go应用的基本执行单元，它的创建、退出以及goroutine间的通信都有很多常见的模式可循。
+> goroutine作为Go应用的基本执行单元，它的创建、退出以及goroutine间的通信都有很多常见的模式可循。日常开发中实用的goroutine使用模式有哪些？
 >
-> 日常开发中实用的goroutine使用模式有哪些？
 
 
 
-## 32 并发：聊聊Goroutine调度器的原理🔖
+## 32 并发：聊聊Goroutine调度器的原理
 
 > Go运行时是如何将一个个Goroutine调度到CPU上执行的？
 
@@ -5919,7 +5916,7 @@ Goroutine们要竞争的“CPU”资源就是**操作系统线程**。
 
 Goroutine调度器的任务也就明确了：**将Goroutine按照一定算法放到不同的操作系统线程中去执行**。
 
-### 32.2 Goroutine调度器模型与演化过程
+### 32.2 Goroutine调度器模型与演化过程 🔖
 
 Goroutine调度器的实现不是一蹴而就的，它的调度模型与算法也是几经演化，**从最初的G-M模型、到G-P-M模型，从不支持抢占，到支持协作式抢占，再到支持基于信号的异步抢占**，Goroutine调度器经历了不断地优化与打磨。
 
@@ -6034,7 +6031,9 @@ type m struct {
 }
 ```
 
+Goroutine调度器的目标，就是公平合理地将各个G调度到P上“运行”。
 
+下面重点看看**G是如何被调度**的。
 
 #### G被抢占调度
 
@@ -6079,13 +6078,13 @@ func sysmon() {
 }
 ```
 
-sysmon每20us~10ms启动一次，主要完成了这些工作：
+sysmon每`20us~10ms`启动一次，主要完成了这些工作：
 
-- 释放闲置超过5分钟的span内存；
+- 释放闲置超过5分钟的**span内存**；
 - 如果超过2分钟没有垃圾回收，强制执行；
-- 将长时间未处理的netpoll结果添加到任务队列；
+- 将长时间未处理的`netpoll`结果添加到任务队列；
 - 向长时间运行的G任务发出抢占调度；
-- 收回因syscall长时间阻塞的P；
+- 收回因`syscall`长时间阻塞的P；
 
 sysmon将“向长时间运行的G任务发出抢占调度”，这个事情由函数`retake`实施：
 
@@ -6138,7 +6137,58 @@ func preemptone(_p_ *p) bool {
 除了这个常规调度之外，还有两个特殊情况下G的调度方法:
 
 - 第一种：channel阻塞或网络I/O情况下的调度。
+
+  如果G被阻塞在某个channel操作或网络I/O操作上时，G会被放置到某个等待（wait）队列中，而M会尝试运行P的下一个可运行的G。如果这个时候P没有可运行的G供M运行，那么M将解绑P，并进入挂起状态。当I/O操作完成或channel操作完成，在等待队列中的G会被唤醒，标记为可运行（runnable），并被放入到某P的队列中，绑定一个M后继续执行。
+
 - 第二种：系统调用阻塞情况下的调度。
+
+  如果G被阻塞在某个系统调用（system call）上，那么不光G会阻塞，执行这个G的M也会解绑P，与G一起进入挂起状态。如果此时有空闲的M，那么P就会和它绑定，并继续执行其他G；如果没有空闲的M，但仍然有其他G要去执行，那么Go运行时就会创建一个新M（线程）。
+
+当系统调用返回后，阻塞在这个系统调用上的G会尝试获取一个可用的P，如果没有可用的P，那么G会被标记为runnable，之前的那个挂起的M将再次进入挂起状态。
+
+### 小结
+
+![](images/image-20250103164942657.png)
+
+基于Goroutine的并发设计离不开一个高效的生产级调度器。Goroutine调度器演进了十余年，先后经历了**G-M模型、G-P-M模型和work stealing算法、协作式的抢占调度以及基于信号的异步抢占**等改进与优化，目前Goroutine调度器相对稳定和成熟，可以适合绝大部分生产场合。
+
+现在的G-P-M模型和最初的G-M模型相比，通过向G-M模型中增加了一个代表**逻辑处理器**的P，使得Goroutine调度器具有了更好的伸缩性。
+
+M是Go**代码运行的真实载体**，包括Goroutine调度器自身的逻辑也是在M中运行的。
+
+P在G-P-M模型中占据核心地位，它拥有待调度的G的队列，同时M要想运行G必须绑定一个P。一个G被调度执行的时间不能过长，超过特定长的时间后，G会被设置为**可抢占**，并在下一次执行函数或方法时被Go运行时移出运行状态。
+
+如果G被阻塞在某个channel操作或网络I/O操作上时，M可以不被阻塞，这避免了大量创建M导致的开销。但如果G因慢系统调用而阻塞，那么M也会一起阻塞，但在阻塞前会与P解绑，P会尝试与其他M绑定继续运行其他G。但若没有现成的M，Go运行时会建立新的M，这也是系统调用可能导致系统线程数量增加的原因，你一定要注意这一点。
+
+### 思考
+
+```go
+func deadloop() {
+    for {
+    } 
+}
+
+func main() {
+    go deadloop()
+    for {
+        time.Sleep(time.Second * 1)
+        fmt.Println("I got scheduled!")
+    }
+}
+```
+
+问题：
+
+1. 在一个拥有多核处理器的主机上，使用 Go 1.13.x 版本运行这个示例代码，你在命令行终端上是否能看到“I got scheduled!”输出呢？也就是 main goroutine 在创建 deadloop goroutine 之后是否能继续得到调度呢？
+2. 我们通过什么方法可以让上面示例中的 main goroutine，在创建 deadloop goroutine 之后无法继续得到调度？
+
+
+
+答案：🔖
+
+go1.13的话加上runtime.GOMAXPROCS(1)， main goroutine在创建 deadloop goroutine 之后就无法继续得到调度。
+
+但如果是go1.14之后的话即使加上runtime.GOMAXPROCS(1)， main goroutine在创建 deadloop goroutine 之后还是可以得到调度，应该是因为增加了对非协作的抢占式调度的支持。
 
 
 
@@ -6170,7 +6220,11 @@ ch1 := make(chan int)     // 无缓冲channel
 ch2 := make(chan int, 5)   // 带缓冲channel
 ```
 
+`make(chan T)`创建的、元素类型为T的channel类型，是**无缓冲channel**；
 
+`make(chan T, capacity)`创建的元素类型为T、缓冲区长度为capacity的channel类型，是**带缓冲channel**。
+
+这两种类型的变量关于发送（send）与接收（receive）的特性是不同的。
 
 #### 发送与接收
 
@@ -6279,7 +6333,7 @@ func main() {
 
 在消费者函数consume中，我们使用了for range循环语句来从channel中接收数据，for range会阻塞在对channel的接收操作上，直到channel中有数据可接收或channel被关闭循环，才会继续向下执行。channel被关闭后，for range循环也就结束了。
 
-#### 关闭channel
+#### 关闭channel 🔖
 
 
 
@@ -6291,7 +6345,7 @@ ch <- 13 // panic: send on closed channel
 
 
 
-#### select
+#### select 🔖
 
 同时对多个channel进行操作时
 
@@ -6324,19 +6378,191 @@ default:             // 当上面case中的channel通信均无法实施时，执
 
 - 1对1通知信号
 
+```go
+type signal struct{}
+
+func worker() {
+    println("worker is working...")
+    time.Sleep(1 * time.Second)
+}
+
+func spawn(f func()) <-chan signal {
+    c := make(chan signal)
+    go func() {
+        println("worker start to work...")
+        f()
+        c <- signal{}
+    }()
+    return c
+}
+
+func main() {
+    println("start a worker...")
+    c := spawn(worker)
+    <-c
+    fmt.Println("worker work done!")
+}
+```
 
 
-- 1对n通知信号
+
+- 1对n通知信号，常被用于协调多个Goroutine一起工作
+
+```go
+func worker(i int) {
+	fmt.Printf("worker %d: is working...\n", i)
+	time.Sleep(1 * time.Second)
+	fmt.Printf("worker %d: works done\n", i)
+}
+
+type signal struct{}
+
+func spawnGroup(f func(i int), num int, groupSignal <-chan signal) <-chan signal {
+	c := make(chan signal)
+	var wg sync.WaitGroup
+
+	for i := 0; i < num; i++ {
+		wg.Add(1)
+		go func(i int) {
+			<-groupSignal
+			fmt.Printf("worker %d: start to work...\n", i)
+			f(i)
+			wg.Done()
+		}(i + 1)
+	}
+
+	go func() {
+		wg.Wait()
+		c <- signal{}
+	}()
+	return c
+}
+
+func main() {
+	fmt.Println("start a group of workers...")
+	groupSignal := make(chan signal)
+	c := spawnGroup(worker, 5, groupSignal)
+	time.Sleep(5 * time.Second)
+	fmt.Println("the group of workers start to work...")
+	close(groupSignal)
+	<-c
+	fmt.Println("the group of workers work done!")
+}
+```
+
+这个例子中，main goroutine创建了一组5个worker goroutine，这些Goroutine启动后会阻塞在名为groupSignal的无缓冲channel上。main goroutine通过`close(groupSignal)`向所有worker goroutine广播“开始工作”的信号，收到groupSignal后，所有worker goroutine会**“同时”**开始工作，就像起跑线上的运动员听到了裁判员发出的起跑信号枪声。
+
+运行结果：
+
+```go
+start a group of workers...
+the group of workers start to work...
+worker 3: start to work...
+worker 3: is working...
+worker 4: start to work...
+worker 4: is working...
+worker 1: start to work...
+worker 1: is working...
+worker 5: start to work...
+worker 5: is working...
+worker 2: start to work...
+worker 2: is working...
+worker 3: works done
+worker 4: works done
+worker 5: works done
+worker 1: works done
+worker 2: works done
+the group of workers work done!
+```
+
+可以看到，关闭一个无缓冲channel会让所有阻塞在这个channel上的接收操作返回，从而实现了一种1对n的**“广播”**机制。
 
 #### 第二种用法：用于替代锁机制
 
+无缓冲channel具有同步特性，这让它在某些场合可以替代锁，让程序更加清晰，可读性也更好。对比：
+
 - 一个传统的、基于“共享内存”+“互斥锁”的Goroutine安全的计数器
 
+```go
+type counter struct {
+    sync.Mutex
+    i int
+}
 
+var cter counter
+
+func Increase() int {
+    cter.Lock()
+    defer cter.Unlock()
+    cter.i++
+    return cter.i
+}
+
+func main() {
+    var wg sync.WaitGroup
+
+    for i := 0; i < 10; i++ {
+        wg.Add(1)
+        go func(i int) {
+            v := Increase()
+            fmt.Printf("goroutine-%d: current counter value is %d\n", i, v)
+            wg.Done()
+        }(i)
+    }
+
+    wg.Wait()
+}
+```
+
+这个示例中，使用了一个带有互斥锁保护的全局变量作为计数器，所有要操作计数器的Goroutine共享这个全局变量，并在互斥锁的同步下对计数器进行自增操作。
 
 - 无缓冲channel替代锁
 
-### 33.3 带缓冲channel的惯用法 🔖
+```go
+type counter struct {
+    c chan int
+    i int
+}
+
+func NewCounter() *counter {
+    cter := &counter{
+        c: make(chan int),
+    }
+    go func() {
+        for {
+            cter.i++
+            cter.c <- cter.i
+        }
+    }()
+    return cter
+}
+
+func (cter *counter) Increase() int {
+    return <-cter.c
+}
+
+func main() {
+    cter := NewCounter()
+    var wg sync.WaitGroup
+    for i := 0; i < 10; i++ {
+        wg.Add(1)
+        go func(i int) {
+            v := cter.Increase()
+            fmt.Printf("goroutine-%d: current counter value is %d\n", i, v)
+            wg.Done()
+        }(i)
+    }
+    wg.Wait()
+}
+```
+
+这个实现中将计数器操作全部交给一个独立的Goroutine去处理，并通过无缓冲channel的同步阻塞特性，实现了计数器的控制。这样其他Goroutine通过Increase函数试图增加计数器值的动作，实质上就转化为了一次无缓冲channel的接收动作。
+
+这种并发设计逻辑更符合Go语言所倡导的**“不要通过共享内存来通信，而是通过通信来共享内存”**的原则。
+
+### 33.3 带缓冲channel的惯用法 🔖🔖
+
+带缓冲的channel与无缓冲的channel的最大不同之处，就在于它的**==异步性==**。也就是说，对一个带缓冲channel，在缓冲区未满的情况下，对它进行发送操作的Goroutine不会阻塞挂起；在缓冲区有数据的情况下，对它进行接收操作的Goroutine也不会阻塞挂起。
 
 #### 第一种用法：用作消息队列
 
@@ -6374,6 +6600,22 @@ default:             // 当上面case中的channel通信均无法实施时，执
 
 
 
+### 小结
+
+Go为了原生支持并发，把channel视作一等公民身份，这就大幅提升了开发人员使用channel进行并发设计和实现的体验。
+
+通过预定义函数make可以创建两类channel：无缓冲channel与带缓冲的channel。这两类channel具有不同的收发特性，可以适用于不同的应用场合：无缓冲channel兼具通信与同步特性，常用于作为信号通知或替代同步锁；而带缓冲channel的异步性，让它更适合用来实现基于内存的消息队列、计数信号量等。
+
+值为nil的channel的阻塞特性，有些时候它也能帮上大忙。而面对已关闭的channel也一定要小心，尤其要避免向已关闭的channel发送数据，那会导致panic。
+
+select是Go为了支持同时操作多个channel，而引入的另外一个并发原语，select与channel有几种常用的固定搭配。
+
+### 思考
+
+> 日常开发中还见过哪些实用的channel使用模式呢？
+
+
+
 ## 34 并发：如何使用共享变量？🔖
 
 > Rob Pike：“不要通过共享内存来通信，应该通过通信来共享内存（Don’t communicate by sharing memory, share memory by communicating）”
@@ -6382,26 +6624,26 @@ Go主流风格：**使用channel进行不同Goroutine间的通信**。
 
 不过，Go也并没有彻底放弃基于共享内存的并发模型，而是在提供CSP并发模型原语的同时，还通过标准库的sync包，提供了针对传统的、基于共享内存并发模型的低级同步原语，包括：互斥锁（`sync.Mutex`）、读写锁（sync.RWMutex）、条件变量（`sync.Cond`）等，并通过atomic包提供了原子操作原语等等。
 
-### sync包低级同步原语可以用在哪？
+### 34.1 sync包低级同步原语可以用在哪？
 
 - 首先是需要高性能的临界区（critical section）同步机制场景。
 - 第二种就是在不想转移结构体对象所有权，但又要保证结构体内部状态数据的同步访问的场景。
 
-### sync包中同步原语使用的注意事项
+
+
+### 34.2 sync包中同步原语使用的注意事项
 
 
 
-### 互斥锁（Mutex）还是读写锁（RWMutex）？
+### 34.3 互斥锁（Mutex）还是读写锁（RWMutex）？
 
 
 
-### 条件变量
+### 34.4 条件变量
 
 
 
-### 原子操作（atomic operations）
-
-
+### 34.5 原子操作（atomic operations）
 
 
 
@@ -6420,6 +6662,12 @@ sync包中的低级同步原语各有各的擅长领域：
 如果你对同步的性能有极致要求，且并发量较大，读多写少，那么可以考虑一下atomic包提供的原子操作函数。
 
 
+
+### 思考
+
+> 使用基于共享内存的并发模型时，最令人头疼的可能就是“死锁”问题的存在了。
+>
+> 死锁的产生条件？编写一个程序模拟一下死锁的发生？
 
 
 
