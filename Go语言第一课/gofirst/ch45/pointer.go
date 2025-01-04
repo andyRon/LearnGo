@@ -1,6 +1,9 @@
 package main
 
-import "unsafe"
+import (
+	"fmt"
+	"unsafe"
+)
 
 type foo struct {
 	id   string
@@ -27,5 +30,6 @@ func main() {
 	println(p)
 	var p7 *int = &a
 	(*p) += 5
-	println(*p7) // 22
+	println(*p7)          // 22
+	fmt.Printf("%p\n", p) // 0x14000122018
 }
