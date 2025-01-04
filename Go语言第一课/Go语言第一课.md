@@ -7446,15 +7446,25 @@ func main() {
 
 # 补充
 
-## 43 如何拉取私有的Go Module？
+## 43 如何拉取私有的Go Module？🔖
 
 ### 43.1 导入本地module
+
+彻底抛弃Gopath构建模式，全面拥抱Go Module构建模式。
+
+> **如果我们的项目依赖的是本地正在开发、尚未发布到公共站点上的Go Module，那么我们应该如何做呢？**
+
+Go 1.18之前:**go.mod的replace指示符**
 
 
 
 ### 43.2 拉取私有module的需求与参考方案
 
 ![](images/06be396d9cce45cf8db37119c429cf35.jpg)
+
+
+
+
 
 
 
@@ -7508,7 +7518,9 @@ func main() {
 
 
 
-## 44 作为Go Module的作者，你应该知道的几件事
+## 44 作为Go Module的作者，你应该知道的几件事🔖
+
+从Go Module的作者或维护者的视角，看看在规划、发布和维护Go Module时需要考虑和注意什么事情，包括go项目仓库布局、Go Module的发布、升级module主版本号、作废特定版本的module，等等。
 
 ### 44.1 仓库布局：是单module还是多module
 
@@ -7550,7 +7562,13 @@ func main() {
 
 - 第二个情况：repo下的module各自独立进行版本发布。
 
-![](images/e1c19cbd8600425bbf709f345ed64509.jpg)
+![](images/image-20250104155812081.png)
+
+
+
+
+
+
 
 ## 45 Go指针
 
