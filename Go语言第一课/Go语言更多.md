@@ -578,6 +578,22 @@ Format类函数主要的功能是将其他类型格式化成字符串。
 
 
 
+### 47.9 log
+
+
+
+其它
+
+`log/slog`
+
+第三方日志库
+
+[zap](https://github.com/uber-go/zap)
+
+[logrus](https://github.com/appleboy/gorush)
+
+https://github.com/rs/zerolog
+
 
 
 ### net包
@@ -612,11 +628,7 @@ io/ioutil 包
 
 
 
-### log 🔖
-
-https://www.topgoer.com/%E5%B8%B8%E7%94%A8%E6%A0%87%E5%87%86%E5%BA%93/log.html
-
-
+### 
 
 ### template
 
@@ -671,4 +683,230 @@ Go语言程序在运行期使用reflect包访问程序的反射信息。
 
 
 ### 48.6 使用反射创建变量
+
+
+
+## 49 命令行工具
+
+### 编译命令go build
+
+go build命令常用参数：
+
+```
+-v 编译时显示包名
+-p n 指定编译时并发的数量（使用n表示），该值默认为CPU 的逻
+-a 强制进行重新构建
+-n 仅输出编译时执行的所有命令
+-x 执行编译并输出编译时执行的所有命令
+-race 开启竞态检测
+```
+
+### 清理命令go clean
+
+清理所有编译生成的文件，具体包括：
+
+1. 当前目录下生成的与包名或Go源码文件名相同的可执行文件，以及当前目录中的_obj和_test目录中名称为_testmain.go、test.out、build.out、a.out及后缀为.5、.6、.8、.a、.o和.so的文件。这些文件通常是执行go build命令后生成的。
+2. 以当前目录下生成的包名加“.test”后缀为名的文件。这些文件通常是执行go test命令后生成的。
+3. 工作区中pkg和bin目录的相应归档文件和可执行文件。这些文件通常是执行go install命令后生成的。
+
+go clean命令通常用于使用VCS（版本控制系统，如Git）的团队，在提交代码前运行，以免将编译时生成的临时文件及编译后生成的可执行文件等错误地提交到代码仓库中。
+
+```
+-i	清除关联的安装包和可运行文件，这些文件通常是执行 gQ install 命令后生成的
+-n	仅输出清理时执行的所有命令
+-r	递归清除在 import 中引入的包
+-x	执行清理并输出清理时执行的所有命令
+-cache	清理缓存，这些缓存文件通常是执行go build命令后生成的
+-testcache	清理测试结果
+```
+
+### 运行命令go run
+
+执行go run命令时也会编译Go源码文件，但生成的可执行文件被存放在临时目录中，并自动运行这个可执行文件。
+
+```go
+func main() {
+	fmt.Println(os.Args)
+}
+```
+
+```sh
+go run main.go -color blue
+[/var/folders/8k/ntbhdf615p34cflx1_qwv38r0000gn/T/go-build692689547/b001/exe/main -color blue]
+```
+
+### 代码格式化命令gofmt
+
+
+
+### 编译并安装命令go install
+
+
+
+### 获取包命令go get
+
+
+
+## 50 文件处理
+
+### 50.1 文件操作
+
+大多数文件操作的函数都是在os包中的，几个目录操作例子：
+
+```go
+func Mkdir(name string, perm FileMode) error  // 创建名称为name的目录，权限设置是perm，如0555
+func MkdirAll(path string, perm FileMode) error // 根据path创建多级子目录，如zuolan/test1/test2
+func Remove(name string) error  // 删除名称为name的目录，当目录下有文件或者其他目录时会出错
+func RemoveAll(path string) error  // 根据path删除多级子目录，如果path是单个名称，那么该目录下的子目录全部删除
+```
+
+#### 创建文件与查看状态
+
+```go
+// 1 新建文件
+func Create(name string) (file *File, err Erroe)  // 根据提供的文件名称创建新的文件，返回一个文件对象，默认权限是0666的文件，返回的文件对象是可读写的
+func NewFile(fd uintptr, name string) *File  // 根据文件描述符创建相应的文件，返回一个文件对象
+// 2 新建文件夹
+func MkdirAll(path sring, perm FileMode) eror
+// 3 文件/文件夹状态
+func Stat(name string) (FileInfo, error)
+```
+
+在创建文件夹或者文件时，权限是一次性指定的，后续若要修改文件权限，需要使用其他函数。
+
+判断文件是否存在，可以使用函数os.IsNotExit(err)，这个函数可以通过传入的ert参数判断文件是否存在并返回一个布尔值。
+
+
+
+#### 重命名与移动
+
+```go
+func Rename(oldpath, newpath string) error
+```
+
+
+
+#### 打开与关闭
+
+```go
+// 只读方式，内部调用OpenFile()
+func Open(name string) (file *File, err Error)
+// flag是打开的方式，包括只读、读写等
+func OpenFile(name string, flag int, perm uint32) (file *File, err Error)
+```
+
+flag属性可以单独使用，也可以组合使用:
+
+```go
+os.O_CREATE | os. O_APPEND
+os.O_CREATE | os. O_TRUNC | os. O_WRONLY
+//os. O_RDONLY      //只读
+//os. O_WRONLY       //只写
+//os. O_RDWR         //读写
+//os. O_APPEND       //往文件中添加（Append）
+//os. O_CREATE       //如果文件不存在则先创建
+//os. O_TRUNC        //文件打开时裁剪文件
+//os. O_EXCL         //和O_CREATE一起使用,文件不能存在
+//os. O_SYNC         //以同步I/O的方式打开
+```
+
+
+
+#### 删除与截断
+
+```go
+err := os. Remove("test.txt")
+if err !=nil{
+  log. Fatal(err)
+}
+```
+
+```go
+err := os.Truncate("test.txt", 100)
+if err !=nil{
+  log. Fatal(err)
+}
+```
+
+裁剪一个文件到100B，如果文件本来就少于100B，则文件中原始内容得以保留，剩余的字节以null字节填充。
+
+如果文件本来超过100B，则超过的字节会被抛弃，这样总是得到精确的100B的文件。而如果传入0，则会清空文件。
+
+#### 读写文件
+
+读写文件中最常见的操作有复制文件、编辑、跳转、替换等。
+
+##### 1复制文件
+
+`io.Copy(dst Writer, src Reader) (written int64, err error)`
+
+注意：
+
+Create函数执行之后需要Close()函数关闭回收资源。
+
+调用io包中的复制函数之后文件内容并没有真正保存在文件中，而是使用Sync()函数同步之后才真正保存到硬盘中。
+
+##### 2跳转函数
+
+Seek()函数的特点类似于鼠标光标的定位，指定位置之后可以执行复制、剪切、粘贴等操作。
+
+##### 3写入函数
+
+```go
+func (file *File) Write(b []byte) (n int, err Error)             //写入byte类型的信息到文件
+func (file *File) WriteAt(b []byte, off int64) (n int, err Error)//在指定位置开始写入byte类型的信息
+func (file *File) WriteString(s string) (ret int, err Error)     //写入string信息到文件
+```
+
+
+
+#### 权限控制
+
+
+
+
+
+#### 文件链接
+
+在Linux系统中肯定会经常遇到硬链接或者软链接之类的文件，对于一个普通文件，它实际上指向了硬盘的一个索引地址。硬链接会创建一个新的指针并且指向同一个地方，硬链接会保持与原文件双向同步，其中一个文件改动，另一个文件也会改动，但只有所有的链接被删除后文件才会被删除（即移动和重命名都不会影响硬链接）。硬链接只在相同的文件系统中才能工作。
+
+软链接和硬链接不一样，它不直接指向硬盘中相同的地方，而是通过名字引用其他文件，它们可以指向不同的文件系统中的不同文件。Windows操作系统不支持软链接。
+
+```go
+// 创建一个硬链接
+	// 创建后同一个文件内容会有两个文件名,改变一个文件的内容会影响另一个
+	// 删除和重命名不会影响另一个
+	hardLink := filePath + "_hl"
+	err := os.Link(filePath, hardLink)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("创建硬链接")
+	// 创建一个软链接
+	softLink := filePath + "_sl"
+	err = os.Symlink(fileName, softLink)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("创建软链接")
+
+	// Lstat返回一个文件的信息,但是当文件是一个软链接时,它返回软链接的信息,而不是引用的文件的信息
+	// Symlink在Windows中不工作
+	fileInfo, err := os.Lstat(softLink)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("链接信息: %+v", fileInfo)
+	// 改变软链接的拥有者不会影响原始文件
+	err = os.Lchown(softLink, os.Getuid(), os.Getgid())
+	if err != nil {
+		log.Fatal(err)
+	}
+```
+
+os.Lstat()的函数名中可以看出这是一个针对软链接的函数，用于查看软链接自己的属性，使用os.Stat()函数会获取软链接指向的原文件信息。
+
+需要注意软链接和硬链接实现的异同，从上面这两个函数的第一个参数来看，虽然都是oldname，但实际例子中传递给函数的并不是同一个函数，硬链接是filePath，而软链接是fileName，因为硬链接是从项目根目录开始创建硬链接的，而软链接是根据目标文件的相对位置创建软链接的。
+
+### 50.2 XML文件处理
 

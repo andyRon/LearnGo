@@ -1,10 +1,10 @@
 package main
 
 import (
-	"fmt"
-	"time"
+	"net/http"
+	_ "net/http/pprof"
 )
 
 func main() {
-	fmt.Println(time.Now())
+	http.ListenAndServe(":6060", nil)
 }

@@ -2261,7 +2261,7 @@ Go语言中，可以使用**const代码块**定义的常量集合，来实现枚
 
 Go将C语言枚举类型的这种基于前一个枚举值加1的特性，分解成了Go中的两个特性：**自动重复上一行，以及引入const块中的行==偏移量指示器==`iota`**，这样它们就可以分别独立使用了。
 
-- Go的const语法提供了“隐式重复前一个非空表达式”的机制
+#### Go的const语法提供了“隐式重复前一个非空表达式”的机制
 
 ```go
 const (
@@ -2281,7 +2281,7 @@ const (
 ) 
 ```
 
-- `iota`
+#### `iota`
 
 iota是Go语言的一个==预定义标识符==，它表示的是const声明块（包括单行声明）中，每个常量所处位置在块中的**偏移值**（从零开始）。
 
@@ -2395,6 +2395,24 @@ const (
     k             // 4, iota = 2
 )
 ```
+
+> 内置包中iota使用例子：
+>
+> ```go
+> // log/log.go
+> const (
+> 	Ldate         = 1 << iota     // the date in the local time zone: 2009/01/23
+> 	Ltime                         // the time in the local time zone: 01:23:23
+> 	Lmicroseconds                 // microsecond resolution: 01:23:23.123123.  assumes Ltime.
+> 	Llongfile                     // full file name and line number: /a/b/c/d.go:23
+> 	Lshortfile                    // final file name element and line number: d.go:23. overrides Llongfile
+> 	LUTC                          // if Ldate or Ltime is set, use UTC rather than the local time zone
+> 	Lmsgprefix                    // move the "prefix" from the beginning of the line to before the message
+> 	LstdFlags     = Ldate | Ltime // initial values for the standard logger
+> )
+> ```
+>
+> 
 
 ### 思考题
 
