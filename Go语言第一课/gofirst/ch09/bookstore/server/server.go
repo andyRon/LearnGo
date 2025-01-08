@@ -125,7 +125,7 @@ func (bs *BookStoreServer) delBookHandler(w http.ResponseWriter, req *http.Reque
 func (bs *BookStoreServer) ListenAndServe() (<-chan error, error) {
 	var err error
 	errChan := make(chan error)
-	// http.Server.ListenAndServe会阻塞代码的继续运行，所以要放到单独的Goroutine
+	// http.server.ListenAndServe会阻塞代码的继续运行，所以要放到单独的Goroutine
 	go func() {
 		err = bs.srv.ListenAndServe()
 		errChan <- err
