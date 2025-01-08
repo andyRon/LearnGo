@@ -628,7 +628,7 @@ io/ioutil 包
 
 
 
-### 
+
 
 ### template
 
@@ -910,3 +910,224 @@ os.Lstat()的函数名中可以看出这是一个针对软链接的函数，用�
 
 ### 50.2 XML文件处理
 
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<servers version="1">
+    <server>
+        <serverName>Local_Web</serverName>
+        <serverIP>172.0.0.1</serverIP>
+    </server>
+    <server>
+        <serverName> Local_DB</serverName>
+        <serverIP>172.0.0.2</serverIP>
+    </server>
+</servers>
+```
+
+#### 解析XML
+
+```go
+package main
+
+import (
+	"encoding/xml"
+	"fmt"
+	"io/ioutil"
+	"os"
+)
+
+type Recurlyservers struct {
+	XMLName     xml.Name `xml:"servers"`
+	Version     string   `xml:"version,attr"`
+	Svs         []server `xml:"server"`
+	Description string   `xml:",innerxml"`
+}
+type server struct {
+	XMLName    xml.Name `xml:"server"`
+	ServerName string   `xml:"serverName"`
+	ServerIP   string   `xml:"serverIP"`
+}
+
+func main() {
+	file, err := os.Open("servers.xml")
+	if err != nil {
+		fmt.Printf("error: %v", err)
+		return
+	}
+	defer file.Close()
+	data, err := ioutil.ReadAll(file)
+	if err != nil {
+		fmt.Printf("error: %v", err)
+		return
+	}
+	v := Recurlyservers{}
+	err = xml.Unmarshal(data, &v)
+	if err != nil {
+		fmt.Printf("error: %v", err)
+		return
+	}
+	fmt.Println(v)
+}
+```
+
+结果：
+
+```sh
+$ go run xml.go
+{{ servers} 1 [{{ server} Local_Web 172.0.0.1} {{ server}  Local_DB 172.0.0.2}] 
+    <server>
+        <serverName>Local_Web</serverName>
+        <serverIP>172.0.0.1</serverIP>
+    </server>
+    <server>
+        <serverName> Local_DB</serverName>
+        <serverIP>172.0.0.2</serverIP>
+    </server>
+}
+```
+
+XML文件解析成对应的struct对象是通过xml包的Unmarshal函数来解析XML文件：
+
+```go
+func Unmarshal(data []byte, v interface{}) error
+```
+
+data接收的是XML数据流，v是需要输出的结构，定义为interface，目前支持struct、slice和string，xml包内部采用了反射进行数据的映射，所以v中的字段必须是导出的。Unmarshal解析时XML元素和字段是怎样对应起来的呢？这是有一个优先级读取流程的，首先会读取struct tag，如果没有，那么就会读取对应字段名。必须注意的一点是，解析的时候，tag、字段名、XML元素都是大小写敏感的，所以，字段必须一一对应。
+
+Go语言的反射机制，可以利用这些tag信息将来自XML文件中的数据反射成对应的struct对象。
+
+解析XML到struct时需要遵循以下规则：
+
+1. 如果struct的一个字段是string或者[]byte类型，且它的tag含有",innerxml"，Unmarshal会将此字段所对应的元素内所有内嵌的原始XML累加到此字段上，如上面例子中的Description定义，最后的输出如下：
+
+   ```xml
+   		<server>
+           <serverName>Local_Web</serverName>
+           <serverIP>172.0.0.1</serverIP>
+       </server>
+       <server>
+           <serverName> Local_DB</serverName>
+           <serverIP>172.0.0.2</serverIP>
+       </server>
+   ```
+
+2. 如果struct中有一个名为XMLName，且类型为xml.Name的字段，那么在解析时就会保存这个element的名字到该字段，如上面例子中的servers。
+
+3. 如果某个struct字段的tag定义中含有XML结构中element的名称，那么解析时就会把相应的element值赋给该字段，如上面例子中的serverName和serverIP定义。
+
+4. 如果某个struct字段的tag定义了含有",attr"，那么解析时就会将该结构所对应的element的与字段同名的属性的值赋给该字段，如上version定义。
+
+5. 如果某个struct字段的tag定义形如"a>b>c"，则解析时，会将XML结构a下面的b下面的c元素的值赋给该字段。
+
+6. 如果某个struct字段的tag定义了"-"，那么不会为该字段解析匹配任何XML数据。
+
+7. 如果struct字段后面的tag定义了",any"，当它的子元素在不满足其他规则时就会匹配到这个字段。
+
+8. 如果某个XML元素包含一条或者多条注释，那么这些注释将被累加到第一个tag含有",comments"的字段上，这个字段的类型可能是[]byte或string，如果没有这样的字段存在，那么注释将会被抛弃。
+
+#### 生成XML
+
+```go
+func Marshal(v interface{}) ([]byte, error)
+func MarshalIndent(v interface{}, prefix, indent string) ([]byte, error)
+```
+
+
+
+```go
+package main
+
+import (
+	"encoding/xml"
+	"fmt"
+	"os"
+)
+
+type servers struct {
+	XMLName xml.Name `xml:"servers"`
+	Version string   `xml:"version,attr"`
+	Svs     []server `xml:"server"`
+}
+type server struct {
+	ServerName string `xml:"serverName"`
+	ServerIP   string `xml:"serverIP"`
+}
+
+func main() {
+	v := &servers{Version: "1"}
+	v.Svs = append(v.Svs, server{"Local_Web", "172.0.0.1"})
+	v.Svs = append(v.Svs, server{"Local_DB", "172.0.0.2"})
+	output, err := xml.MarshalIndent(v, "  ", "  ")
+	if err != nil {
+		fmt.Printf("error: %v\n", err)
+	}
+	os.Stdout.Write([]byte(xml.Header))
+	os.Stdout.Write(output)
+}
+```
+
+结果：
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+  <servers version="1">
+    <server>
+      <serverName>Local_Web</serverName>
+      <serverIP>172.0.0.1</serverIP>
+    </server>
+    <server>
+      <serverName>Local_DB</serverName>
+      <serverIP>172.0.0.2</serverIP>
+    </server>
+  </servers>
+```
+
+
+
+Marshal函数接收的参数v是interface{}类型，即它可以接收任意类型的参数，xml包会根据下面的规则来生成相应的XML文件：
+
+1. 如果v是array或者slice，那么便输出每一个元素，类似于value。
+2. 如果v是指针，那么会输出Marshal指针指向的内容，如果指针为空，什么都不输出。
+3. 如果v是interface，那么就处理interface所包含的数据。
+4. 如果v是其他数据类型，就会输出这个数据类型所拥有的字段信息。
+
+生成的XML文件中的element的名字根据如下优先级从struct中获取：
+
+1. 如果v是struct，XMLName的tag中定义的名称。
+2. 类型为xml.Name的名叫XMLName的字段的值。
+3. 通过struct中字段的tag来获取。
+4. 通过struct的字段名来获取。
+5. marshall的类型名称。
+
+设置struct中字段的tag信息以控制最终XML文件的生成：
+
+1. XMLName不会被输出。
+
+2. tag中含有"-"的字段不会输出。
+
+3. tag中含有"name,ttr"，会以name作为属性名，字段值作为值输出为这个XML元素的属性，如上version字段所描述。
+
+4. tag中含有",attr"，会以这个struct的字段名作为属性名输出为XML元素的属性，类似于上一条，只是这个name默认是字段名。
+
+5. tag中含有",chardata"，输出为XML的character data而非element。
+
+6. tag中含有",innerxml"，将会被原样输出，而不会进行常规的编码过程。
+
+7. tag中含有",comment"，将被当作XML注释来输出，而不会进行常规的编码过程，字段值中不能含有"--"字符串。
+
+8. tag中含有"omitempty"，如果该字段的值为空值，那么该字段就不会被输出到XML，空值包括false、0、nil指针或nil接口，以及任何长度为0的array、slice、map或者string。
+
+9. tag中含有"a>b>c"，那么就会循环输出3个元素，a包含b，b包含c，例如：
+
+   ```
+       FirstName string `xml: "name>first"`
+       LastName string `xml :"name>last"`
+       <name>
+           <first>Asta</first>
+           <1ast>Xie</last>
+       </name>
+   ```
+
+   
+
+#### XML文件的读写操作
