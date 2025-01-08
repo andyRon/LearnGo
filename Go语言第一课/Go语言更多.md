@@ -1160,3 +1160,26 @@ func Unmarshal(data []byte, v interface{}) error
 
 
 
+### 50.4 日志
+
+```sh
+go get -u github.com/sirupsen/logrus
+```
+
+
+
+### 50.5 压缩
+
+#### 打包与解包
+
+`archive/zip`
+
+打包
+
+解包
+
+
+
+#### 压缩与解压
+
+`compress/gzip`
