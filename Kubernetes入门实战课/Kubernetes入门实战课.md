@@ -177,35 +177,181 @@ redis-server &
 
 ## 3 容器化的应用：会了这些你就是Docker高手
 
-### 什么是容器化的应用
+### 3.1 什么是容器化的应用
 
-### 常用的镜像操作有哪些
+从功能上来看，镜像和常见的tar、rpm、deb等安装包一样，都打包了应用程序，**但最大的不同点在于它里面不仅有基本的可执行文件，还有应用运行时的整个系统环境。这就让镜像具有了非常好的跨平台便携性和兼容性**，能够让开发者在一个系统上开发（例如Ubuntu），然后打包成镜像，再去另一个系统上运行（例如CentOS），完全不需要考虑环境依赖的问题，是一种更高级的应用打包方式。
+
+**所谓的“容器化的应用”，或者“应用的容器化”，就是指应用程序不再直接和操作系统打交道，而是封装成镜像，再交给容器环境去运行**。
+
+
+
+### 3.2 常用的镜像操作有哪些
 
 镜像的完整名字由两个部分组成，名字和标签，中间用:连接起来。
 
-### 常用的容器操作有哪些
 
 
+
+
+### 3.3 常用的容器操作有哪些
+
+`docker run` 是最复杂的一个容器操作命令，有非常多的额外参数用来调整容器的运行状态，你可以加上 `--help` 来看它的帮助信息。
+
+
+
+![](images/image-20250113154507757.png)
+
+[Docker官方文档](https://docs.docker.com/reference/)
 
 
 
 ## 4 创建容器镜像：如何编写正确、高效的Dockerfile
 
-### 镜像的内部机制是什么
+> 这些镜像是怎么创建出来的？我们能不能够制作属于自己的镜像呢？
 
-### Dockerfile是什么
+### 4.1 镜像的内部机制是什么
 
-比起容器、镜像来说，Dockerfile非常普通，它就是一个纯文本，里面记录了一系列的构建指令，比如选择基础镜像、拷贝文件、运行脚本等等，每个指令都会生成一个Layer，而Docker顺序执行这个文件里的所有步骤，最后就会创建出一个新的镜像出来。
+镜像就是一个打包文件，里面包含了应用程序还有它运行所依赖的环境，例如**文件系统、环境变量、配置参数**等等。
+
+环境变量、配置参数，随便用一个manifest清单就可以管理。为了保证容器运行环境的一致性，镜像必须把应用程序所在操作系统的根目录，也就是rootfs，都包含进来。
+
+> 容器共享了宿主机的内核。
+
+分层
+
+容器镜像内部并不是一个平坦的结构，而是由许多的镜像层组成的，每层都是只读不可修改的一组文件，相同的层可以在镜像之间共享，然后多个层像搭积木一样堆叠起来，再使用一种叫“**Union FS联合文件系统**”的技术把它们合并在一起，就形成了容器最终看到的文件系统。
+
+![](images/c750a7795ff4787c6639dd42bf0a473f.png)
+
+ 通过`docker inspect` 来查看镜像的分层信息，分层信息在“RootFS”部分:
+
+```sh
+docker inspect nginx:alpine
+```
+
+```json
+"RootFS": {
+  "Type": "layers",
+  "Layers": [
+    "sha256:534a70dc82967ee32184e13d28ea485e909b20d3f13d553122bab3e4de03b50c",
+    "sha256:b2910501c84396134537ff442a4e2222ab6486c6016ea4c1016ed96337ef64ef",
+    "sha256:cbb38b57f14055b3acc7a4bae43e5a41bcd7621c1f56f3f920abb89a65c3c025",
+    "sha256:e1482d48072939900a66dbbec794450822aff9176d11302592f230249da91238",
+    "sha256:3bc38db2acdbab2b44537e4a354dbcb05ed3bbbcb54674993471ee0c7232f041",
+    "sha256:20ca17bb1caf19cc991d7b4bc6915b25c9fbe1e1b297f04712ec692b53017c9a",
+    "sha256:856b39837f15b572e89d179002698b4f4e7447d91740590718368b7ebec9ff63",
+    "sha256:a81f475c8ce219c6b25147ee82b5b101144ee007c3bd849db063be67e6a78521"
+	]
+},
+```
+
+Docker会检查是否有重复的层，如果本地已经存在就不会重复下载，如果层被其他镜像共享就不会删除，这样就可以节约磁盘和网络成本。
+
+### 4.2 Dockerfile是什么
+
+比起容器、镜像来说，Dockerfile非常普通，它就是一个**纯文本**，里面记录了一系列的构建指令，比如选择基础镜像、拷贝文件、运行脚本等等，**每个指令都会生成一个Layer**，而Docker顺序执行这个文件里的所有步骤，最后就会创建出一个新的镜像出来。
+
+```dockerfile
+# Dockerfile.busybox
+FROM busybox                  # 选择基础镜像
+CMD echo "hello world"        # 启动容器时默认运行的命令
+```
+
+- 第一条指令是 `FROM`，所有的Dockerfile都要从它开始，表示选择构建使用的基础镜像，相当于“打地基”。
+
+- 第二条指令是 `CMD`，它指定 `docker run` 启动容器时默认运行的命令。
+
+Dockerfile相当于“施工图纸”，而 `docker build` 就相当于“施工队”，来创建出镜像：
+
+```sh
+$ docker build -f Dockerfile.busybox .
+
+[+] Building 0.0s (5/5) FINISHED                                                                                              docker:default
+ => [internal] load build definition from Dockerfile.busybox                                                                            0.0s
+ => => transferring dockerfile: 81B                                                                                                     0.0s
+ => [internal] load metadata for docker.io/library/busybox:latest                                                                       0.0s
+ => [internal] load .dockerignore                                                                                                       0.0s
+ => => transferring context: 2B                                                                                                         0.0s
+ => [1/1] FROM docker.io/library/busybox:latest                                                                                         0.0s
+ => exporting to image                                                                                                                  0.0s
+ => => exporting layers                                                                                                                 0.0s
+ => => writing image sha256:e8c55f4e1cdf24541ba7e31ba2b5363efa2b3c6f939cb370ff1cb5395b9105a5                                            0.0s
+```
 
 
 
-### 怎样编写正确、高效的Dockerfile
+### 4.3 怎样编写正确、高效的Dockerfile
 
+`COPY`命令的用法和Linux的cp差不多，不过拷贝的源文件必须是“**构建上下文**”路径里的，不能随意指定文件。
 
+```dockerfile
+COPY ./a.txt  /tmp/a.txt    # 把构建上下文里的a.txt拷贝到镜像的/tmp目录
+COPY /etc/hosts  /tmp       # 错误！不能使用构建上下文之外的文件
+```
 
-### docker build是怎么工作的
+`RUN`是Dockerfile里最重要的一个指令，它可以执行任意的Shell命令，比如更新系统、安装应用、下载文件、创建目录、编译程序等等，实现任意的镜像构建步骤，非常灵活。
+
+```dockerfile
+RUN apt-get update \
+    && apt-get install -y \
+        build-essential \
+        curl \
+        make \
+        unzip \
+    && cd /tmp \
+    && curl -fSL xxx.tar.gz -o xxx.tar.gz\
+    && tar xzf xxx.tar.gz \
+    && cd xxx \
+    && ./config \
+    && make \
+    && make clean
+```
+
+太长可以**把这些Shell命令集中到一个脚本文件里，用 `COPY` 命令拷贝进去再用 `RUN` 来执行**：
+
+```dockerfile
+COPY setup.sh  /tmp/                # 拷贝脚本到/tmp目录
+
+RUN cd /tmp && chmod +x setup.sh \  # 添加执行权限
+    && ./setup.sh && rm setup.sh    # 运行脚本然后再删除
+```
+
+`RUN`指令实际上就是Shell编程，有变量的概念，可以实现参数化运行，需要使用两个指令 `ARG` 和 `ENV`。
+
+**它们区别在于 `ARG` 创建的变量只在镜像构建过程中可见，容器运行时不可见，而 `ENV` 创建的变量不仅能够在构建镜像的过程中使用，在容器运行时也能够以环境变量的形式被应用程序使用。**
+
+例子，使用 `ARG` 定义了基础镜像的名字（可以用在“FROM”指令里），使用 `ENV` 定义了两个环境变量：
+
+```dockerfile
+ARG IMAGE_BASE="node"
+ARG IMAGE_TAG="alpine"
+
+ENV PATH=$PATH:/tmp
+ENV DEBUG=OFF
+```
+
+ `EXPOSE`令用来声明容器对外服务的端口号，对现在基于Node.js、Tomcat、Nginx、Go等开发的微服务系统来说非常有用：
+
+```dockerfile
+EXPOSE 443           # 默认是tcp协议
+EXPOSE 53/udp        # 可以指定udp协议
+```
+
+> 注意：因为每个指令都会生成一个镜像层，所以Dockerfile里最好不要滥用指令，尽量精简合并，否则太多的层会导致镜像臃肿不堪。
+
+### 4.4 docker build是怎么工作的
 
 Dockerfile必须要经过 `docker build` 才能生效。
+
+因为命令行“docker”是一个简单的客户端，真正的镜像构建工作是由服务器端的“Docker daemon”来完成的，所以“docker”客户端就只能把“构建上下文”目录打包上传（显示信息 `Sending build context to Docker daemon` ），这样服务器才能够获取本地的这些文件。
+
+![](images/c8116066bdbf295a7c9fc25b87755dfe.jpg)
+
+“构建上下文”其实与Dockerfile并没有直接的关系，它其实指定了要打包进镜像的一些依赖文件。而 `COPY` 命令也只能使用基于“构建上下文”的相对路径，因为“Docker daemon”看不到本地环境，只能看到打包上传的那些文件。
+
+但这个机制也会导致一些麻烦，如果目录里有的文件（例如readme/.git/.svn等）不需要拷贝进镜像，docker也会一股脑地打包上传，效率很低。
+
+为了避免这种问题，可以在“构建上下文”目录里再建立一个 `.dockerignore` 文件，语法与 `.gitignore` 类似，排除那些不需要的文件。
 
 
 
