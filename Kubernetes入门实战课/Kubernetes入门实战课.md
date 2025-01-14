@@ -353,35 +353,605 @@ Dockerfile必须要经过 `docker build` 才能生效。
 
 为了避免这种问题，可以在“构建上下文”目录里再建立一个 `.dockerignore` 文件，语法与 `.gitignore` 类似，排除那些不需要的文件。
 
+`-t` 参数，为镜像起一个有意义的名字，方便管理。
 
 
 
+例子：
+
+```dockerfile
+# Dockerfile
+# docker build -t ngx-app .
+# docker build -t ngx-app:1.0 .
+
+ARG IMAGE_BASE="nginx"
+ARG IMAGE_TAG="1.21-alpine"
+
+FROM ${IMAGE_BASE}:${IMAGE_TAG}
+
+COPY ./default.conf /etc/nginx/conf.d/
+
+RUN cd /usr/share/nginx/html \
+    && echo "hello nginx" > a.txt
+
+EXPOSE 8081 8082 8083
+```
+
+
+
+### 思考题
+
+> docker镜像里的层都是只读不可修改的，但容器运行的时候经常会写入数据，这个冲突应该怎么解决呢？
+
+- 当使用 Docker 运行一个容器时，会在镜像之上添加一个可写层。这就是 Docker 解决镜像层只读但容器需要写入数据的方式。
+- 当在容器中创建、修改或删除文件时，这些操作实际上是在这个可写层上进行的，而不是直接修改镜像层。
+
+> 镜像的分层结构带来了哪些好处?
+
+1. 高效存储和共享
+
+**复用层减少存储需求**
+
+**快速分发和部署**
+
+2. 易于更新和维护
+
+**增量更新**
+
+**版本控制**
+
+3. 可移植性和隔离性
+
+**跨平台一致性**
+
+**隔离性**
+
+4. 安全性和可靠性
+
+**分层验证**
+
+**故障隔离**
 
 ## 5 镜像仓库：该怎样用好Docker Hub这个宝藏
 
-什么是镜像仓库（Registry）
-什么是Docker Hub
-如何在Docker Hub上挑选镜像
-Docker Hub上镜像命名的规则是什么
-该怎么上传自己的镜像
-离线环境该怎么办
+### 什么是镜像仓库（Registry）
+
+![](images/c8116066bdbf295a7c9fc25b87755dfe.jpg)
+
+Registry，直译就是“注册中心”，意思是所有镜像的Repository都在这里登记保管，就像是一个巨大的档案馆。
+
+左边的“docker pull”，虚线显示了它的工作流程，先到“Docker daemon”，再到Registry，只有当Registry里存有镜像才能真正把它下载到本地。
+
+镜像仓库除了能够拉取镜像，还可以上传、查询、删除等等。
+
+
+
+### 什么是Docker Hub
+
+“**Docker Hub**”（https://hub.docker.com/）是默认的官方镜像仓库。
+
+
+
+### 如何在Docker Hub上挑选镜像
+
+Docker Hub上有**官方镜像**（“**Official image**”）、**认证镜像**（“**Verified publisher**”）和**非官方镜像**的区别。
+
+官方镜像是指Docker公司官方提供的高质量镜像（https://github.com/docker-library/official-images），都经过了严格的漏洞扫描和安全检测，支持x86_64、arm64等多种硬件架构，还具有清晰易读的文档，一般来说是我们构建镜像的首选，也是我们编写Dockerfile的最佳范例。
+
+认证镜像，也就是认证发行商，比如Bitnami、Rancher、Ubuntu等。它们都是颇具规模的大公司，具有不逊于Docker公司的实力，所以就在Docker Hub上开了个认证账号，发布自己打包的镜像，有点类似我们微博上的“大V”。这些镜像有公司背书，当然也很值得信赖，不过它们难免会带上一些各自公司的“烙印”，比如Bitnami的镜像就统一以“minideb”为基础，灵活性上比Docker官方镜像略差，有的时候也许会不符合我们的需求。
+
+非官方镜像可以分出两类：
+
+1. “**半官方**”镜像
+2. 纯粹的“**民间**”镜像
+
+
+
+镜像区分：“**用户名/应用名**”，比如`bitnami/nginx`、`ubuntu/nginx`、`rancher/nginx` 等等。
+
+
+
+### Docker Hub上镜像命名的规则是什么
+
+官方的Redis镜像作为例子，解释一下标签。
+
+![](images/1dd392b8f286507b83cd31400d5dccd5.png)
+
+通常来说，镜像标签的格式是**==应用的版本号+操作系统==**。
+
+版本号基本上都是**==主版本号+次版本号+补丁号==**的形式，有的还会在正式发布前出==rc==版（候选版本，release candidate）。而操作系统的情况略微复杂一些，因为各个Linux发行版的命名方式“花样”太多了。
+
+Alpine、CentOS的命名比较简单明了，就是数字的版本号，像这里的 `alpine3.15` ，而Ubuntu、Debian则采用了代号的形式。比如Ubuntu 18.04是 `bionic`，Ubuntu 20.04是 `focal`，Debian 9是 `stretch`，Debian 10是 `buster`，Debian 11是 `bullseye`。
+
+**另外，有的标签还会加上 `slim`、`fat`，来进一步表示这个镜像的内容是经过精简的，还是包含了较多的辅助工具**。通常 `slim` 镜像会比较小，运行效率高，而 `fat` 镜像会比较大，适合用来开发调试。
+
+几个标签的例子来说明一下。
+
+- nginx:1.21.6-alpine，表示版本号是1.21.6，基础镜像是最新的Alpine。
+- redis:7.0-rc-bullseye，表示版本号是7.0候选版，基础镜像是Debian 11。
+- node:17-buster-slim，表示版本号是17，基础镜像是精简的Debian 10。
+
+### 该怎么上传自己的镜像🔖
+
+- 第一步，在Docker Hub上注册一个用户
+- 第二步，在本机上使用 `docker login` 命令
+- 第三步，使用 `docker tag` 命令，给镜像改成带用户名的完整名字，表示镜像是属于这个用户的。或者简单一点，直接用 `docker build -t` 在创建镜像的时候就起好名字。
+- 第四步，用 `docker push` 把这个镜像推上去
+
+
+
+### 离线环境该怎么办🔖
+
+最佳的方法就是在内网环境里仿造Docker Hub，创建一个自己的私有Registry服务，由它来管理我们的镜像，就像我们自己搭建GitLab做版本管理一样。
+
+自建Registry已经有很多成熟的解决方案，比如**Docker Registry**，还有**CNCF Harbor**。
 
 
 
 ## 6 打破次元壁：容器该如何与外界互联互通
 
-如何拷贝容器内的数据
-如何共享主机上的文件
-如何实现网络互通
-如何分配服务端口号
+### 6.1 如何拷贝容器内的数据
+
+```sh
+# -d、--rm 表示运行在后台，容器结束后自动删除
+$ docker run -d --rm redis
+e32062413b4aa0491aeec0f9d825e18074b3180c5cd4aac6a3f254e50ff4aff0
+
+# 拷贝文件进入容器
+$ docker cp a.txt e32:/tmp
+$ docker exec -it e32 sh
+# ls /tmp
+a.txt
+
+
+# 从容器中拷贝出文件
+$ docker cp e32:/tmp/a.txt ./b.txt
+```
+
+
+
+### 6.2 如何共享主机上的文件
+
+`-v 宿主机路径:容器内路径`
+
+```sh
+$ docker run -d --rm -v /tmp:/tmp redis
+b905d006c3757df91434b9e24db36c653f7558e161ecddb4326ee3361650a6e2
+$ docker exec -it b90 sh
+```
+
+> 简单例子
+>
+> 比如我本机上只有Python 2.7，但我想用Python 3开发，如果同时安装Python 2和Python 3很容易就会把系统搞乱，所以我就可以这么做：
+>
+> 1. 先使用 `docker pull` 拉取一个Python 3的镜像，因为它打包了完整的运行环境，运行时有隔离，所以不会对现有系统的Python 2.7产生任何影响。
+>
+> 2. 在本地的某个目录编写Python代码，然后用 `-v` 参数让容器共享这个目录。
+>
+> 3. 现在就可以在容器里以Python 3来安装各种包，再运行脚本做开发了。
+>
+>    ```sh
+>    docker pull python:alpine 
+>    docker run -it –rm -v `pwd`:/tmp python:alpine sh
+>    ```
+>
+> 显然，这种方式比把文件打包到镜像或者 `docker cp` 会更加灵活，非常适合有频繁修改的开发测试工作。
+
+
+
+### 6.3 如何实现网络互通
+
+网络互通的关键在于“打通”容器内外的网络，而处理网络通信无疑是计算机系统里最棘手的工作之一，有许许多多的名词、协议、工具，在这里我也没有办法一下子就把它都完全说清楚，所以只能从“宏观”层面讲个大概，帮助你快速理解。
+
+Docker提供了三种网络模式：
+
+- **==null==**是最简单的模式，也就是没有网络，但允许其他的网络插件来自定义网络连接。
+- **==host==**是直接使用宿主机网络，相当于去掉了容器的网络隔离（其他隔离依然保留），所有的容器会共享宿主机的IP地址和网卡。这种模式没有中间层，自然通信效率高，但缺少了隔离，运行太多的容器也容易导致端口冲突。
+
+```sh
+$docker run -d --rm --net=host nginx:alpine
+efc735d506599d135db234ed3c53c6162e8deea84783b2befa25c93a66502a05
+```
+
+```sh
+ip addr                    # 本机查看网卡
+docker exec efc ip addr    # 容器查看网卡
+```
+
+结果两个网卡信息相同。
+
+- **==bridge==**，也就是桥接模式，它有点类似现实世界里的交换机、路由器，只不过是由软件虚拟出来的，容器和宿主机再通过虚拟网卡接入这个网桥（图中的docker0），那么它们之间也就可以正常的收发网络数据包了。不过和host模式相比，bridge模式多了**虚拟网桥和网卡**，通信效率会低一些。
+
+![](images/image-20250114154005910.png)
+
+`--net=bridge`设置，但默认动车客人的网络模式就是bridge。
+
+```sh
+$ docker run -d --rm nginx:alpine
+5e69c563f6f9516553e801b3e912bbd54a8003368a15578bbe8a2b0845e6b0af
+$ docker run -d --rm redis
+8401b08d75e927ea960cb3bcc59d9ecea5ed2f1f5860a74a997bd8ccfe8c314c
+$ docker exec 5e6 ip addr
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+18: eth0@if19: <BROADCAST,MULTICAST,UP,LOWER_UP,M-DOWN> mtu 1500 qdisc noqueue state UP 
+    link/ether 02:42:ac:11:00:02 brd ff:ff:ff:ff:ff:ff
+    inet 172.17.0.2/16 brd 172.17.255.255 scope global eth0
+       valid_lft forever preferred_lft forever
+```
+
+（redis容器里没有ip命令）
+
+eth0是一个虚拟网卡，IP地址是B类私有地址“172.17.0.2”。
+
+用 `docker inspect` 直接查看容器的ip地址：
+
+![](images/image-20250114155033104.png)
+
+两个容器的IP地址分别是“172.17.0.2”和“172.17.0.3”，而宿主机的IP地址则是“172.17.0.1”，所以它们都在“172.17.0.0/16”这个Docker的默认网段，彼此之间就能够使用IP地址来实现网络通信了。
+
+### 6.4 如何分配服务端口号
+
+服务器应用都必须要有端口号才能对外提供服务，比如HTTP协议用80、HTTPS用443、Redis是6379、MySQL是3306。
+
+**端口号映射需要使用bridge模式，并且在 `docker run` 启动容器时使用 `-p` 参数，形式和共享目录的 `-v` 参数很类似，用 `:` 分隔本机端口和容器端口**。
+
+```sh
+$ docker run -d -p 80:80 --rm nginx:alpine
+9726b1db68c288a26d3461961e51cdbc30a7dcdf1ec59c82d01af8391f900bdf
+$ docker run -d -p 8080:80 --rm nginx:alpine
+1b042e8da44644a5e1e611b19759fd6f3217e87020f3872ddbf3df6a826e82d3
+$ curl 127.1:8080 -I
+HTTP/1.1 200 OK
+Server: nginx/1.27.3
+Date: Tue, 14 Jan 2025 07:56:08 GMT
+Content-Type: text/html
+Content-Length: 615
+Last-Modified: Tue, 26 Nov 2024 17:22:24 GMT
+Connection: keep-alive
+ETag: "674603d0-267"
+Accept-Ranges: bytes
+
+$ curl 127.1:80 -I
+HTTP/1.1 200 OK
+Server: nginx/1.27.3
+Date: Tue, 14 Jan 2025 07:56:13 GMT
+Content-Type: text/html
+Content-Length: 615
+Last-Modified: Tue, 26 Nov 2024 17:22:24 GMT
+Connection: keep-alive
+ETag: "674603d0-267"
+Accept-Ranges: bytes
+```
+
+![](images/image-20250114155739396.png)
+
+### 小结
+
+```
+docker cp
+docker run -v
+docker run -p
+```
+
+### 思考题
+
+>  `docker cp` 命令和Dockerfile里的`COPY`指令有什么区别？
+
+
+
+> host模式和bridge模式各有什么优缺点，在什么场景下应用最合适？
+
+- Bridge 模式
+
+适合大多数开发、测试和一般的生产场景，提供了较好的网络隔离性和灵活的网络配置，但在性能和网络拓扑复杂时需要考虑性能和网络配置的复杂性。
+
+- Host 模式
+
+适合对性能要求高、需要与主机网络紧密交互的应用，但在使用时要注意网络隔离和安全风险，避免对主机网络造成影响。
+
+在实际应用中，需要根据具体的业务需求、性能要求和安全考虑，合理选择 Docker 的网络模式，确保容器的网络性能和安全。
+
+
 
 ## 7 实战演练：玩转Docker
 
+### 7.1 容器技术要点回顾
 
+容器技术是后端应用领域的一项重大创新，它彻底变革了应用的开发、交付与部署方式，是“云原生”的根本（[01讲]）。
+
+容器基于Linux底层的namespace、cgroup、chroot等功能，虽然它们很早就出现了，但直到Docker“横空出世”，把它们整合在一起，容器才真正走近了大众的视野，逐渐为广大开发者所熟知（[02讲]）。
+
+容器技术中有三个核心概念：**容器（Container）**、**镜像（Image）**，以及**镜像仓库（Registry）**（[03讲]）。
+
+从本质上来说，容器属于虚拟化技术的一种，和虚拟机（Virtual Machine）很类似，都能够分拆系统资源，隔离应用进程，但容器更加轻量级，运行效率更高，比虚拟机更适合云计算的需求。
+
+镜像是容器的静态形式，它把应用程序连同依赖的操作系统、配置文件、环境变量等等都打包到了一起，因而能够在任何系统上运行，免除了很多部署运维和平台迁移的麻烦。
+
+镜像内部由多个层（Layer）组成，每一层都是一组文件，多个层会使用Union FS技术合并成一个文件系统供容器使用。这种细粒度结构的好处是相同的层可以共享、复用，节约磁盘存储和网络传输的成本，也让构建镜像的工作变得更加容易（[04讲]）。
+
+为了方便管理镜像，就出现了镜像仓库，它集中存放各种容器化的应用，用户可以任意上传下载，是分发镜像的最佳方式（[05讲]）。
+
+目前最知名的公开镜像仓库是Docker Hub，其他的还有quay.io、gcr.io，我们可以在这些网站上找到许多高质量镜像，集成到我们自己的应用系统中。
+
+容器技术有很多具体的实现，Docker是最初也是最流行的容器技术，它的主要形态是运行在Linux上的“Docker Engine”。我们日常使用的 `docker` 命令其实只是一个前端工具，它必须与后台服务“Docker daemon”通信才能实现各种功能。
+
+操作容器的常用命令有 `docker ps`、`docker run`、`docker exec`、`docker stop` 等；
+
+操作镜像的常用命令有 `docker images`、`docker rmi`、`docker build`、`docker tag` 等；
+
+操作镜像仓库的常用命令有 `docker pull`、`docker push` 等。
+
+
+
+### 7.2 实战1：建私有镜像仓库
+
+选择最简单的[Docker Registry](https://registry.hub.docker.com/_/registry/)。
+
+```
+docker pull registry
+```
+
+对外暴露端口，这样Docker Registry才能提供服务，它的容器内端口是5000，简单起见，在外面也可以使用同样的5000端口:
+
+```sh
+docker run -d -p 5000:5000 registry
+24c8feddb2ce3c78ca87df0874b899a47d0278930b603b2e19fc59a0486ba30c
+
+docker ps
+CONTAINER ID   IMAGE          COMMAND                   CREATED          STATUS          PORTS                                       NAMES
+24c8feddb2ce   registry       "/entrypoint.sh /etc…"   5 seconds ago    Up 4 seconds    0.0.0.0:5000->5000/tcp, :::5000->5000/tcp   jovial_rubin
+```
+
+使用 `docker tag` 命令给镜像打标签再上传了。因为上传的目标不是默认的Docker Hub，而是本地的私有仓库，所以镜像的名字前面还必须再加上仓库的地址（域名或者IP地址都行），形式上和HTTP的URL非常像：
+
+```sh
+docker tag nginx:alpine 127.0.0.1:5000/nginx:alpine
+
+docker images
+REPOSITORY             TAG           IMAGE ID       CREATED         SIZE
+127.0.0.1:5000/nginx   alpine        f9d642c42f7b   6 weeks ago     50.9MB
+nginx                  alpine        f9d642c42f7b   6 weeks ago     50.9MB
+```
+
+现在，这个镜像有了一个附加仓库地址的完整名字，就可以用 `docker push` 推上去了：
+
+```sh
+$ docker push 127.0.0.1:5000/nginx:alpine
+The push refers to repository [127.0.0.1:5000/nginx]
+a81f475c8ce2: Pushed 
+856b39837f15: Pushed 
+20ca17bb1caf: Pushed 
+3bc38db2acdb: Pushed 
+e1482d480729: Pushed 
+cbb38b57f140: Pushed 
+b2910501c843: Pushed 
+534a70dc8296: Pushed 
+alpine: digest: sha256:4311264dbcbc9f56fa0809d1b4c551827c64abbc717bcd7a76f4407bbfc863b6 size: 1989
+```
+
+
+
+为了验证是否已经成功推送，可以把刚才打标签的镜像删掉，再重新下载：
+
+```
+docker rmi  127.0.0.1:5000/nginx:alpine
+docker pull 127.0.0.1:5000/nginx:alpine
+```
+
+```sh
+$ docker rmi  127.0.0.1:5000/nginx:alpine
+Untagged: 127.0.0.1:5000/nginx:alpine
+Untagged: 127.0.0.1:5000/nginx@sha256:4311264dbcbc9f56fa0809d1b4c551827c64abbc717bcd7a76f4407bbfc863b6
+
+$ docker pull 127.0.0.1:5000/nginx:alpine
+alpine: Pulling from nginx
+Digest: sha256:4311264dbcbc9f56fa0809d1b4c551827c64abbc717bcd7a76f4407bbfc863b6
+Status: Downloaded newer image for 127.0.0.1:5000/nginx:alpine
+127.0.0.1:5000/nginx:alpine
+```
+
+原来的层原本就已经存在，所以不会有实际的下载动作，只会创建一个新的镜像标签。
+
+Docker Registry虽然没有图形界面，但提供了RESTful API，也可以发送HTTP请求来查看仓库里的镜像，具体的端点信息可以参考官方文档（https://docs.docker.com/registry/spec/api/），下面的这两条curl命令就分别获取了镜像列表和Nginx镜像的标签列表：
+
+```sh
+curl 127.1:5000/v2/_catalog
+curl 127.1:5000/v2/nginx/tags/list
+```
+
+```sh
+curl 127.1:5000/v2/_catalog
+{"repositories":["nginx"]}
+curl 127.1:5000/v2/nginx/tags/list
+{"name":"nginx","tags":["alpine"]}
+```
+
+
+
+### 7.3 实战2：搭建WordPress网站
+
+```sh
+docker pull wordpress:5
+docker pull mariadb:10
+docker pull nginx:alpine
+```
+
+![](images/59dfbe961bcd233b83e1c1ec064e2eca.png)
+
+这个系统可以说是比较典型的网站了。MariaDB作为后面的关系型数据库，端口号是3306；WordPress是中间的应用服务器，使用MariaDB来存储数据，它的端口是80；Nginx是前面的反向代理，它对外暴露80端口，然后把请求转发给WordPress。
+
+用 `--env` 参数来指定启动时的数据库、用户名和密码:
+
+```
+docker run -d --rm \
+    --env MARIADB_DATABASE=db \
+    --env MARIADB_USER=wp \
+    --env MARIADB_PASSWORD=123 \
+    --env MARIADB_ROOT_PASSWORD=123 \
+    mariadb:10
+```
+
+使用 `docker exec` 命令，执行数据库的客户端工具“mysql”，验证数据库是否正常运行：
+
+```
+docker exec -it 64d mysql -u wp -p
+```
+
+
+
+```sh
+$ docker run -d --rm \
+    --env MARIADB_DATABASE=db \
+    --env MARIADB_USER=wp \
+    --env MARIADB_PASSWORD=123 \
+    --env MARIADB_ROOT_PASSWORD=123 \
+    mariadb:10
+64d53f78a94825e5f36fde8cf3f89215633a322e7075e491128cb3197053754c
+$ docker exec -it 64d mysql -u wp -p
+Enter password: 
+Welcome to the MariaDB monitor.  Commands end with ; or \g.
+Your MariaDB connection id is 3
+Server version: 10.11.10-MariaDB-ubu2204 mariadb.org binary distribution
+
+Copyright (c) 2000, 2018, Oracle, MariaDB Corporation Ab and others.
+
+Type 'help;' or '\h' for help. Type '\c' to clear the current input statement.
+
+MariaDB [(none)]> show databases;
++--------------------+
+| Database           |
++--------------------+
+| db                 |
+| information_schema |
++--------------------+
+2 rows in set (0.001 sec)
+```
+
+Docker的bridge网络模式的默认网段是“172.17.0.0/16”，宿主机固定是“172.17.0.1”，而且IP地址是顺序分配的。
+
+```
+docker inspect 64d | grep IPAddress
+            "SecondaryIPAddresses": null,
+            "IPAddress": "172.17.0.7",
+                    "IPAddress": "172.17.0.7",
+```
+
+
+
+运行应用服务器WordPress也要用 `--env` 参数来指定一些环境变量才能连接到MariaDB，注意“WORDPRESS_DB_HOST”必须是MariaDB的IP地址，否则会无法连接数据库：
+
+```sh
+$ docker run -d --rm \
+    --env WORDPRESS_DB_HOST=172.17.0.7 \
+    --env WORDPRESS_DB_USER=wp \
+    --env WORDPRESS_DB_PASSWORD=123 \
+    --env WORDPRESS_DB_NAME=db \
+    wordpress:5
+    
+36caa9db5e8f437d56fee2334ef0975dae71529331551e2b0c6fe59a4e330111  
+
+$ docker inspect 36c | grep IPAddress
+            "SecondaryIPAddresses": null,
+            "IPAddress": "172.17.0.8",
+                    "IPAddress": "172.17.0.8",
+```
+
+WordPress容器在启动的时候并没有使用 `-p` 参数映射端口号，所以外界是不能直接访问的，需要在前面配一个Nginx反向代理，把请求转发给WordPress的80端口。配置Nginx反向代理必须要知道WordPress的IP地址。
+
+nginx的配置文件（wp.conf）：
+
+```nginx
+server {
+  listen 80;
+  default_type text/html;
+
+  location / {
+      proxy_http_version 1.1;
+      proxy_set_header Host $host;
+      proxy_pass http://172.17.0.8;
+  }
+}
+```
+
+有了这个配置文件，就需要用 `-p` 参数把本机的端口映射到Nginx容器内部的80端口，再用 `-v` 参数把配置文件挂载到Nginx的“conf.d”目录下。这样，Nginx就会使用刚才编写好的配置文件，在80端口上监听HTTP请求，再转发到WordPress应用：
+
+```sh
+docker run -d --rm \
+    -p 80:80 \
+    -v `pwd`/wp.conf:/etc/nginx/conf.d/default.conf \
+    nginx:alpine
+```
+
+![](images/image-20250114182801810.png)
+
+可以看到，WordPress和MariaDB虽然使用了80和3306端口，但被容器隔离，外界不可见，只有Nginx有端口映射，能够从外界的80端口收发数据，网络状态和我们的架构图是一致的。
+
+
+
+在浏览器访问http://10.211.55.6/，就可以看到WordPress的界面，按步骤创建基本的用户、初始化网站之后，MariaDB中就有相应的表:
+
+```sh
+$ docker exec -it 64d mysql -u wp -p
+Enter password: 
+Welcome to the MariaDB monitor.  Commands end with ; or \g.
+Your MariaDB connection id is 3
+Server version: 10.11.10-MariaDB-ubu2204 mariadb.org binary distribution
+
+Copyright (c) 2000, 2018, Oracle, MariaDB Corporation Ab and others.
+
+Type 'help;' or '\h' for help. Type '\c' to clear the current input statement.
+
+MariaDB [(none)]> use db;
+Database changed
+MariaDB [db]> show tables;
+Empty set (0.000 sec)
+
+MariaDB [db]> show tables;
++-----------------------+
+| Tables_in_db          |
++-----------------------+
+| wp_commentmeta        |
+| wp_comments           |
+| wp_links              |
+| wp_options            |
+| wp_postmeta           |
+| wp_posts              |
+| wp_term_relationships |
+| wp_term_taxonomy      |
+| wp_termmeta           |
+| wp_terms              |
+| wp_usermeta           |
+| wp_users              |
++-----------------------+
+12 rows in set (0.001 sec)
+```
+
+
+
+### 小结
 
 ![](images/79f8c75e018e0a82eff432786110ef16.jpg)
 
+在感受容器便利的同时，还是存在一些遗憾呢？比如说：
+
+- 我们还是要手动运行一些命令来启动应用，然后再人工确认运行状态。
+- 运行多个容器组成的应用比较麻烦，需要人工干预（如检查IP地址）才能维护网络通信。
+- 现有的网络模式功能只适合单机，多台服务器上运行应用、负载均衡该怎么做？
+- 如果要增加应用数量该怎么办？这时容器技术完全帮不上忙。
+
+这个方案已经超越了容器技术本身，是在更高的层次上规划容器的运行次序、网络连接、数据持久化等应用要素，也就是现在我们常说的“**容器编排**”（Container Orchestration）的雏形，也正是后面要学习的Kubernetes的主要出发点。
+
+
+
 ## 8 视频：入门篇实操总结
+
+```
+docker version
+docker info 显示的是当前系统相关的信息，例如 CPU、内存、容器数量、镜像数量、容器运行时、存储文件系统等等。
+```
 
 
 
