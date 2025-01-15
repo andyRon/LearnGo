@@ -955,21 +955,185 @@ docker info 显示的是当前系统相关的信息，例如 CPU、内存、容�
 
 
 
+### 构建自己的镜像
+
+```dockerfile
+ARG IMAGE_BASE="nginx"
+ARG IMAGE_TAG="1.21-alpine"
+
+FROM ${IMAGE_BASE}:${IMAGE_TAG}
+
+ENV PATH=$PATH:/tmp
+ENV DEBUG=OFF
+
+COPY ./default.conf /etc/nginx/conf.d/
+
+RUN cd /usr/share/nginx/html \
+		&& echo "hello nginx" > a.txt
+
+EXPOSE 8081 8082 8083
+
+WORKDIR /etc/nginx
+```
+
+
+
+`expose` 是声明容器对外服务的端口号，而 `workdir` 是容器的工作目录。
+
+
+
+```sh
+docker build -t ngx-app:1.0 .
+
+docker run -it --rm ngx-app:1.0 sh
+
+
+```
+
+
+
+还可以用 docker save/load 命令把它导出成压缩包，方便保存和传输：
+
+```sh
+docker save ngx-app:1.0 -o ngx.tar
+docker load -i ngx.tar
+```
+
+
+
+### 与外部系统互通的操作
+
+
+
+
+
 # 初级
 
 ## 9 走近云原生：如何在本机搭建小巧完备的Kubernetes环境
 
-什么是容器编排
-什么是Kubernetes
-什么是minikube
-如何搭建minikube环境
-实际验证minikube环境
+### 什么是容器编排
+
+容器技术的核心概念是容器、镜像、仓库，使用它们可以轻松地完成应用的打包、分发工作。
+
+不过容器技术在面对服务器集群是，只是解决了运维部署工作的小问题。
+
+现实生产环境的复杂程度实在是太高了，除了最基本的安装，还会有各式各样的需求，比如**服务发现、负载均衡、状态监控、健康检查、扩容缩容、应用迁移、高可用**等等。
+
+虽然容器技术==开启==了云原生时代，但它也只走出了一小步，再继续前进就无能为力了，因为这已经不再是隔离一两个进程的普通问题，而是要**隔离数不清的进程**，还有它们之间**互相通信、互相协作**的超级问题，困难程度可以说是指数级别的上升。
+
+这些容器之上的管理、调度工作，就是这些年最流行的词汇：“**==容器编排==**”（Container Orchestration）。
+
+
+
+### 什么是Kubernetes
+
+Google 集群应用管理系统，代号Borg
+
+==2014==年，Google内部系统要“升级换代”，从原来的Borg切换到Omega。
+
+因为之前在发表MapReduce、BigTable、GFS时吃过亏（被Yahoo开发的Hadoop占领了市场），所以Google决定借着Docker的“东风”，在发论文的同时，把C++开发的Borg系统用Go语言重写并开源，于是Kubernetes就这样诞生了。
+
+由于Kubernetes背后有Borg系统十多年生产环境经验的支持，技术底蕴深厚，理论水平也非常高，一经推出就引起了轰动。然后在==2015==年，Google又联合Linux基金会成立了==CNCF（Cloud Native Computing Foundation，云原生基金会）==，并把Kubernetes捐献出来作为种子项目。
+
+有了Google和Linux这两大家族的保驾护航，再加上宽容开放的社区，作为CNCF的“头把交椅”，Kubernetes旗下很快就汇集了众多行业精英，仅用了两年的时间就打败了同期的竞争对手Apache Mesos和Docker Swarm，成为了这个领域的唯一霸主。
+
+简单来说，Kubernetes就是一个**==生产级别的容器编排平台和集群管理系统==**，不仅能够创建、调度容器，还能够监控、管理服务器，它凝聚了Google等大公司和开源社区的集体智慧，从而让中小型公司也可以具备**轻松运维海量计算节点** —— 也就是“云计算”的能力。
+
+### 什么是minikube
+
+Kubernetes一般都运行在大规模的计算集群上，管理很严格，这就对我们个人来说造成了一定的障碍，没有实际操作环境怎么能够学好用好呢？
+
+好在Kubernetes充分考虑到了这方面的需求，提供了一些快速搭建Kubernetes环境的工具，在[官网](https://kubernetes.io/zh/docs/tasks/tools/)上推荐的有两个：**kind**和**minikube**，它们都可以在本机上运行完整的Kubernetes环境。
+
+- ==kind==基于Docker，意思是“**Kubernetes in Docker**”。它功能少，用法简单，也因此运行速度快，容易上手。不过它缺少很多Kubernetes的标准功能，例如仪表盘、网络插件，也很难定制化，比较适合有经验的Kubernetes用户做快速开发测试，不太适合学习研究。kind的名字与Kubernetes YAML配置里的字段 `kind` 重名，会对初学者造成误解，干扰学习。
+
+- ==minikube==是一个“迷你”版本的Kubernetes，自从2016年发布以来一直在积极地开发维护，紧跟Kubernetes的版本更新，同时也兼容较旧的版本（最多只到之前的6个小版本）。
+
+  可执行文件仅有不到100MB，运行镜像也不过1GB，但就在这么小的空间里却集成了Kubernetes的绝大多数功能特性，不仅有核心的容器编排功能，还有丰富的插件，例如Dashboard、GPU、Ingress、Istio、Kong、Registry等等，综合来看非常完善。
+
+### 如何搭建minikube环境
+
+https://minikube.sigs.k8s.io/docs/
+
+安装:
+
+```sh
+# Linux Intel x86_64
+curl -Lo minikube https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
+
+# Apple arm64  虚拟机中的Linux
+curl -Lo minikube https://storage.googleapis.com/minikube/releases/latest/minikube-linux-arm64
+
+sudo install minikube /usr/local/bin/
+```
+
+```sh
+minikube version
+```
+
+
+
+
+
+
+
+minikube只能够搭建Kubernetes环境，要操作Kubernetes，需要客户端工具“**==kubectl==**”。
+
+[kubectl](https://github.com/kubernetes/kubectl)是一个与Kubernetes、minikube彼此独立的项目，所以不包含在minikube里，但minikube提供了安装它的简化方式:
+
+```sh
+minikube kubectl
+```
+
+
+
+在minikube环境里，会用到两个客户端：minikube管理Kubernetes集群环境，kubectl操作实际的Kubernetes功能:
+
+![](images/image-20250115170248853.png)
+
+### 实际验证minikube环境
+
+现在可以在本机上运行minikube，创建Kubernetes实验环境了。
+
+
+
+```sh
+minikube start --kubernetes-version=v1.23.3
+```
+
+
+
+```sh
+minikube status
+minikube node list
+```
+
+
+
+```sh
+minikube ssh
+
+minikube kubectl -- version 
+```
+
+
+
+```
+alias kubectl="minikube kubectl --"
+
+```
 
 
 
 ## 10 自动化的运维管理：探究Kubernetes工作机制的奥秘
 
 ### 10.1 云计算时代的操作系统
+
+Kubernetes是**一个生产级别的容器编排平台和集群管理系统**，能够创建、调度容器，监控、管理服务器。
+
+容器是软件，是应用，是进程。服务器是硬件，是CPU、内存、硬盘、网卡。那么，既可以管理软件，也可以管理硬件，这个东西就是一个操作系统（Operating System）！
+
+从某种角度来看，Kubernetes可以说是一个集群级别的操作系统，主要功能就是**资源管理和作业调度**。但Kubernetes不是运行在单机上管理单台计算资源和进程，而是运行在多台服务器上管理几百几千台的计算资源，以及在这些资源上运行的上万上百万的进程，规模要大得多。
 
 
 
@@ -1306,10 +1470,15 @@ CNI插件是怎么工作的
 
 
 
+## 结束语 是终点，更是起点
+
+
+
+# 补充
+
 ## docker-compose：单机环境下的容器编排工具
 
 
 
 ## 谈谈Kong Ingress Controller
 
-结束语 是终点，更是起点
