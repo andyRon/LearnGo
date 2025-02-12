@@ -7652,19 +7652,80 @@ Go 1.18之前:**go.mod的replace指示符**
 
 
 
-## 44 作为Go Module的作者，你应该知道的几件事🔖
+## 44 作为Go Module的作者，你应该知道的几件事
 
-从Go Module的作者或维护者的视角，看看在规划、发布和维护Go Module时需要考虑和注意什么事情，包括go项目仓库布局、Go Module的发布、升级module主版本号、作废特定版本的module，等等。
+从Go Module的作者或维护者的视角，看看在规划、发布和维护Go Module时需要考虑和注意什么事情，包括go项目**仓库布局、Go Module的发布、升级module主版本号、作废特定版本的module**，等等。
 
 ### 44.1 仓库布局：是单module还是多module
+
+如果没有单一仓库（monorepo）的强约束，那么在默认情况下，选择**一个仓库管理一个module**是不会错的，这是管理Go Module的最简单的方式，也是最常用的标准方式。这种方式下，module维护者维护起来会很方便，module的使用者在引用module下面的包时，也可以很容易地确定包的导入路径。
+
+🌰例子，在github.com/bigwhite/srsm这个仓库下管理着一个Go Module（==srsm==是single repo single module的缩写）。
+
+通常情况下，module path与仓库地址保持一致，都是github.com/bigwhite/srsm，这点会体现在go.mod中：
+
+```go
+// go.mod
+module github.com/bigwhite/srsm
+
+go 1.22.1
+```
+
+然后对仓库打tag，这个tag也会成为Go Module的版本号，这样，对仓库的版本管理其实就是对Go Module的版本管理。
+
+如果仓库布局如下：
+
+```sh
+./srsm
+├── go.mod
+├── go.sum
+├── pkg1/
+│   └── pkg1.go
+└── pkg2/
+    └── pkg2.go
+```
+
+那么这个module的使用者可以很轻松地确定pkg1和pkg2两个包的导入路径，一个是`github.com/bigwhite/srsm/pkg1`，另一个则是`github.com/bigwhite/srsm/pkg2`。
+
+如果module演进到了v2.x.x版本，那么以pkg1包为例，它的包的导入路径就变成了`github.com/bigwhite/srsm/v2/pkg1`。
+
+
+
+如果组织层面要求采用单一仓库（monorepo）模式，也就是**所有Go Module都必须放在一个repo下**，那只能使用单repo下管理多个Go Module的方法了。
+
+> Go Module的设计者Russ Cox：“在单repo多module的布局下，添加module、删除module，以及对module进行版本管理，都需要相当谨慎和深思熟虑，因此，管理一个单module的版本库，几乎总是比管理现有版本库中的多个module要容易和简单”。
+
+🌰单repo多module的例子，假设repo地址是`github.com/bigwhite/srmm`。这个repo下的结构布局如下（srmm是single repo multiple modules的缩写）：
+
+```sh
+./srmm
+├── module1
+│   ├── go.mod
+│   └── pkg1
+│       └── pkg1.go
+└── module2
+    ├── go.mod
+    └── pkg2
+        └── pkg2.go
+```
+
+srmm仓库下面有两个Go Module，分为位于子目录module1和module2的下面，这两个目录也是各自module的根目录（module root）。这种情况下，module的path也不能随意指定，必须包含子目录的名字。
+
+以module1为例分析，它的path是`github.com/bigwhite/srmm/module1`，只有这样，Go命令才能根据用户导入包的路径，找到对应的仓库地址和在仓库中的相对位置。同理，module1下的包名同样是以module path为前缀的，比如：`github.com/bigwhite/srmm/module1/pkg1`。
+
+在单仓库多module模式下，各个module的版本是独立维护的。因此，我们在通过打tag方式发布某个module版本时，tag的名字必须包含子目录名。比如：如果我们要发布module1的v1.0.0版本，我们不能通过给仓库打v1.0.0这个tag号来发布module1的v1.0.0版本，**正确的作法应该是打`module1/v1.0.0`这个tag号**。
+
+现在可能觉得这样理解起来也没有多复杂，但当各个module的主版本号升级时，你就会感受到这种方式带来的繁琐了。
 
 
 
 ### 44.2 发布Go Module
 
+发布的步骤也十分简单，就是**为repo打上tag并推送到代码服务器上**就好了。
 
 
-### 44.3 作废特定版本的Go Module
+
+### 44.3 作废特定版本的Go Module🔖
 
 ![](images/23931514c6ea70debaeb9e5709cec20a.jpg)
 
@@ -7686,7 +7747,7 @@ Go 1.18之前:**go.mod的replace指示符**
 
 
 
-### 44.4 升级module的major版本号
+### 44.4 升级module的major版本号🔖
 
 
 

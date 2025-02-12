@@ -3,15 +3,31 @@ use-pkg GO的第三方包使用和说明
 
 
 
-### [go-echarts](https://github.com/go-echarts/go-echarts)
+### 1 go-echarts
+
+https://github.com/go-echarts/go-echarts
 
 
 
-### resty 🔖
+### 2 resty 🔖
 
 [`resty`](https://github.com/go-resty/resty)是 Go 语言的一个 HTTP client 库。`resty`功能强大，特性丰富。它支持几乎所有的 HTTP 方法（GET/POST/PUT/DELETE/OPTION/HEAD/PATCH等），并提供了简单易用的 API。
 
 https://segmentfault.com/a/1190000040247099
+
+
+
+### 3 gorm
+
+https://github.com/go-gorm/gorm
+
+https://gorm.io/
+
+https://gorm.io/zh_CN/docs/
+
+
+
+
 
 
 
@@ -31,7 +47,11 @@ Mockery 是一个用于 Go 语言的代码生成工具，主要用于生成接�
 
 [`colly`]()是用 Go 语言编写的功能强大的爬虫框架。它提供简洁的 API，拥有强劲的性能，可以自动处理 cookie&session，还有提供灵活的扩展机制。
 
+https://go-colly.org/
 
+爬虫
+
+https://segmentfault.com/a/1190000040275945
 
 ### cobra
 
@@ -41,11 +61,13 @@ https://github.com/spf13/cobra
 
  
 
+对比  https://github.com/urfave/cli
+
 
 
 ### 日志管理：zap
 
-GitHub地址：[https://github.com/spf13/viper](https://link.zhihu.com/?target=https%3A//github.com/spf13/viper)
+GitHub地址：https://github.com/uber-go/zap
 
 - 支持JSON/TOML/YAML/HC:/en:L/envfile/Java properties等多种格式的配置文件；
 - 可以设置监听配置文件的修改，修改时自动加载新的配置；
@@ -57,23 +79,13 @@ GitHub地址：[https://github.com/spf13/viper](https://link.zhihu.com/?target=h
 
 ### 配置管理：viper
 
-
-
-### gorm
-
-https://github.com/go-gorm/gorm/
+https://github.com/spf13/viper
 
 
 
 
 
-### Colly
 
-https://go-colly.org/
-
-爬虫
-
-https://segmentfault.com/a/1190000040275945
 
 
 
