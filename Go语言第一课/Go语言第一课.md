@@ -6673,33 +6673,109 @@ select是Go为了支持同时操作多个channel，而引入的另外一个并�
 
 
 
-## 34 并发：如何使用共享变量？🔖
+## 34 并发：如何使用共享变量？ 🔖
 
 > Rob Pike：“不要通过共享内存来通信，应该通过通信来共享内存（Don’t communicate by sharing memory, share memory by communicating）”
 
 Go主流风格：**使用channel进行不同Goroutine间的通信**。
 
-不过，Go也并没有彻底放弃基于共享内存的并发模型，而是在提供CSP并发模型原语的同时，还通过标准库的sync包，提供了针对传统的、基于共享内存并发模型的低级同步原语，包括：互斥锁（`sync.Mutex`）、读写锁（sync.RWMutex）、条件变量（`sync.Cond`）等，并通过atomic包提供了原子操作原语等等。
+不过，<u>Go也并没有彻底放弃基于共享内存的并发模型，而是在提供CSP并发模型原语的同时，还通过标准库的sync包，提供了针对传统的、基于共享内存并发模型的低级同步原语</u>，包括：互斥锁（`sync.Mutex`）、读写锁（sync.RWMutex）、条件变量（`sync.Cond`）等，并通过atomic包提供了原子操作原语等等。
 
 ### 34.1 sync包低级同步原语可以用在哪？
 
+一般建议优先考虑CSP并发模型进行并发程序设计。下面一些场景依然需要sync包提供的低级同步原语。
+
 - 首先是**需要高性能的临界区（critical section）同步机制场景**。
 
+sync.Mutex和channel各自实现的临界区同步机制，做个简单的性能基准测试对比：
+
+`sync_test.go`
+
+```go
+package main
+
+import (
+	"sync"
+	"testing"
+)
+
+var cs = 0 // 模拟临界区要保护的数据
+var mu sync.Mutex
+var c = make(chan struct{}, 1)
+
+func criticalSectionSyncByMutex() {
+	mu.Lock()
+	cs++
+	mu.Unlock()
+}
+
+func criticalSectionSyncByChan() {
+	c <- struct{}{}
+	cs++
+	<-c
+}
+
+func BenchmarkCriticalSectionSyncByMutex(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		criticalSectionSyncByMutex()
+	}
+}
+
+func BenchmarkCriticalSectionSyncByMutexInParallel(b *testing.B) {
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			criticalSectionSyncByMutex()
+		}
+	})
+}
+
+func BenchmarkCriticalSectionSyncByChan(b *testing.B) {
+	for n := 0; n < b.N; n++ {
+		criticalSectionSyncByChan()
+	}
+}
+
+func BenchmarkCriticalSectionSyncByChanInParallel(b *testing.B) {
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			criticalSectionSyncByChan()
+		}
+	})
+}
+```
 
 
 
+```sh
+$ go test -bench .
+goos: darwin
+goarch: arm64
+pkg: gofirst/ch34
+BenchmarkCriticalSectionSyncByMutex-8             	88083549	        13.64 ns/op
+BenchmarkCriticalSectionSyncByMutexInParallel-8   	22337848	        55.29 ns/op
+BenchmarkCriticalSectionSyncByChan-8              	28172056	        42.48 ns/op
+BenchmarkCriticalSectionSyncByChanInParallel-8    	 5722972	       208.1 ns/op
+PASS
+
+```
+
+结果：无论是在单Goroutine情况下，还是在并发测试情况下，`sync.Mutex`实现的同步机制的性能，都要比channel实现的高出三倍多。
 
 - 第二种就是**在不想转移结构体对象所有权，但又要保证结构体内部状态数据的同步访问的场景**。
 
+基于channel的并发设计，有一个特点：在Goroutine间通过channel转移数据对象的所有权。所以，只有拥有数据对象所有权（从channel接收到该数据）的Goroutine才可以对该数据对象进行状态变更。
 
-
-### 34.2 sync包中同步原语使用的注意事项
-
-
+如果你的设计中没有转移结构体对象所有权，但又要保证结构体内部状态数据在多个Goroutine之间同步访问，那么你可以使用sync包提供的低级同步原语来实现，比如最常用的`sync.Mutex`。
 
 
 
-### 34.3 互斥锁（Mutex）还是读写锁（RWMutex）？
+### 34.2 sync包中同步原语使用的注意事项 
+
+
+
+
+
+### 34.3 互斥锁（Mutex）还是读写锁（RWMutex）？ 
 
 使用互斥锁的两个原则：
 
@@ -6758,9 +6834,9 @@ sync包中的低级同步原语各有各的擅长领域：
 
 
 
-## 35 即学即练：如何实现一个轻量级线程池？
+## 35 即学即练：如何实现一个轻量级线程池？🔖
 
-### 为什么要用到Goroutine池？
+### 35.1 为什么要用到Goroutine池？
 
 **Goroutine的开销虽然“廉价”，但也不是免费的**。
 
@@ -6778,7 +6854,7 @@ sync包中的低级同步原语各有各的擅长领域：
 
 
 
-### workerpool的实现原理
+### 35.2 workerpool的实现原理
 
 采用完全基于channel+select的实现方案，不使用其他数据结构，也不使用sync包提供的各种同步结构
 
@@ -6798,11 +6874,11 @@ capacity是pool的一个属性，代表整个pool中worker的最大容量。我�
 
 
 
-### workerpool的一个最小可行实现
+### 35.3 workerpool的一个最小可行实现
 
 
 
-### 添加功能选项机制
+### 35.4 添加功能选项机制
 
 
 
