@@ -2776,13 +2776,74 @@ PersistentVolume、PersistentVolumeClaim、StorageClass 管理的是集群里的
 
 ## 29 集群管理：如何用名字空间分隔系统资源？
 
-为什么要有名字空间
-如何使用名字空间
-什么是资源配额
-如何使用资源配额
-默认资源配额
+### 29.1 为什么要有名字空间
+
+**Kubernetes的名字空间并不是一个实体对象，只是一个逻辑上的概念**。
+
+
+
+### 29.2 如何使用名字空间
+
+```sh
+kubectl create ns test-ns 
+kubectl get ns
+```
+
+
+
+### 29.3 什么是资源配额
+
+
+
+### 29.4 如何使用资源配额
+
+
+
+### 29.5 默认资源配额
+
+
+
+
 
 ## 30 系统监控：如何使用Metrics Server和Prometheus？
+
+集群的可观测性
+
+### Metrics Server
+
+```sh
+kubectl top
+```
+
+[Metrics Server](https://github.com/kubernetes-sigs/metrics-server)是一个专门用来收集Kubernetes核心资源指标（metrics）的工具，它定时从所有节点的kubelet里采集信息，但是对集群的整体性能影响极小，每个节点只大约会占用1m的CPU和2MB的内存，所以性价比非常高。
+
+Metrics Server的工作方式是，它调用kubelet的API拿到节点和Pod的指标，再把这些信息交给apiserver，这样kubectl、HPA就可以利用apiserver来读取指标了：
+
+![](images/8f4a22788c03b06377cabe791c67989e.png)
+
+### HorizontalPodAutoscaler
+
+“**HorizontalPodAutoscaler**”，简称是“**hpa**”。它是专门用来自动伸缩Pod数量的对象，适用于Deployment和StatefulSet，但不能用于DaemonSet。
+
+HorizontalPodAutoscaler的能力完全基于Metrics Server，它从Metrics Server获取当前应用的运行指标，主要是CPU使用率，再依据预定的策略增加或者减少Pod的数量。
+
+
+
+### Prometheus
+
+Prometheus比Metrics Server和HorizontalPodAutoscaler更全面。
+
+Prometheus的历史比Kubernetes还要早一些，它最初是由Google的离职员工在2012年创建的开源项目，灵感来源于Borg配套的BorgMon监控系统。后来在2016年，Prometheus作为第二个项目加入了CNCF，并在2018年继Kubernetes之后顺利毕业，成为了CNCF的不折不扣的“二当家”，也是云原生监控领域的“事实标准”。
+
+和Kubernetes一样，Prometheus也是一个庞大的系统。
+
+![图片](images/e62cebb3acc995246f203d698dfdc964.png)
+
+### 小结
+
+1. Metrics Server是一个Kubernetes插件，能够收集系统的核心资源指标，相关的命令是 `kubectl top`。
+2. Prometheus是云原生监控领域的“事实标准”，用PromQL语言来查询数据，配合Grafana可以展示直观的图形界面，方便监控。
+3. HorizontalPodAutoscaler实现了应用的自动水平伸缩功能，它从Metrics Server获取应用的运行指标，再实时调整Pod数量，可以很好地应对突发流量。
 
 
 
@@ -2790,14 +2851,105 @@ PersistentVolume、PersistentVolumeClaim、StorageClass 管理的是集群里的
 
 ## 31 网络通信：CNI是怎么回事？又是怎么工作的？
 
-Kubernetes的网络模型
-什么是CNI
-CNI插件是怎么工作的
-使用Calico网络插件
+Kubernetes的网络接口标准CNI，以及Calico、Cilium等性能更好的网络插件。
+
+### 31.1 Kubernetes的网络模型
+
+Docker里最常用的bridge网络模式：
+
+![](images/image-20250220000042644.png)
+
+Docker会创建一个名字叫“docker0”的网桥，默认是私有网段“172.17.0.0/16”。每个容器都会创建一个虚拟网卡对（veth pair），两个虚拟网卡分别“插”在容器和网桥上，这样容器之间就可以互联互通了。
+
+Docker的网络方案简单有效，但问题是它只局限在单机环境里工作，跨主机通信非常困难（需要做端口映射和网络地址转换）。
+
+针对Docker的网络缺陷，Kubernetes提出了一个自己的网络模型“**IP-per-pod**”，能够很好地适应集群系统的网络需求，它有下面的这4点基本假设：
+
+- 集群里的每个Pod都会有唯一的一个IP地址。
+- Pod里的所有容器共享这个IP地址。
+- 集群里的所有Pod都属于同一个网段。
+- Pod直接可以基于IP地址直接访问另一个Pod，不需要做麻烦的网络地址转换（NAT）。
+
+Kubernetes网络模型的示意图：
+
+![](images/image-20250220000251768.png)
+
+这个网络让Pod摆脱了主机的硬限制，是一个“平坦”的网络模型，很好理解，通信自然也非常简单。
+
+因为Pod都具有独立的IP地址，相当于一台虚拟机，而且直连互通，也就可以很容易地实施域名解析、负载均衡、服务发现等工作，以前的运维经验都能够直接使用，对应用的管理和迁移都非常友好。
+
+### 31.2 什么是CNI
+
+Kubernetes定义的这个网络模型很完美，但要把这个模型落地实现就不那么容易了。所以Kubernetes就专门制定了一个标准：**CNI**（Container Networking Interface）。
+
+
+
+三个插件：
+
+[Flannel](https://github.com/flannel-io/flannel/)  性能不是太好，不建议在生产环境里使用
+
+[Calico](https://github.com/projectcalico/calico)  
+
+[Cilium](https://github.com/cilium/cilium)
+
+### 31.3 CNI插件是怎么工作的
+
+![](images/96ffd51d7c843596f6736d23467888b7.jpg)
+
+### 31.4 使用Calico网络插件
+
+
+
+![](images/yyb9c0ee93730542ebb5475a734991c7.jpg)
+
+
+
+### 小结
+
+Kubernetes的整个网络数据传输过程有大量的细节，非常多的环节都参与其中，想把它彻底弄明白还真不是件容易的事情。
+
+不过好在CNI通过“依赖倒置”的原则把这些工作都交给插件去解决了，不管下层是什么样的环境，不管插件是怎么实现的，我们在Kubernetes集群里只会有一个干净、整洁的网络空间。
+
+1. Kubernetes使用的是“IP-per-pod”网络模型，每个Pod都会有唯一的IP地址，所以简单易管理。
+2. CNI是Kubernetes定义的网络插件接口标准，按照实现方式可以分成“Overlay”“Route”和“Underlay”三种，常见的CNI插件有Flannel、Calico和Cilium。
+3. Flannel支持Overlay模式，它使用了cni0网桥和flannel.1设备，本机通信直接走cni0，跨主机通信会把原始数据包封装成VXLAN包再走宿主机网卡发送，有性能损失。
+4. Calico支持Route模式，它不使用cni0网桥，而是创建路由规则，把数据包直接发送到目标网卡，所以性能高。
+
+
 
 
 
 ## 32 实战演练：玩转Kubernetes（3）
+
+### 要点回顾一：API对象
+
+
+
+### 要点回顾二：应用管理
+
+
+
+### 要点回顾三：集群管理
+
+
+
+### 搭建WordPress网站
+
+
+
+### 部署Dashboard
+
+
+
+### 部署Ingress/Ingress Controller
+
+
+
+### 访问Dashboard
+
+
+
+
 
 
 
@@ -2806,6 +2958,18 @@ CNI插件是怎么工作的
 
 
 ## 结束语 是终点，更是起点
+
+**学Kubernetes最好是结合自己的实际情况，定个“小目标”**，比如“我要学会在Kubernetes里开发云原生应用”“我要运维Kubernetes的监控系统”“我要搭建出高可用的Kubernetes生产系统”等等，而我当初的目标就是“要搞明白Nginx Ingress Controller的用法”。
+
+有了这样比较明确的目标，你就会有方向、有重点地去研究Kubernetes，方便检查自己的学习进度，也更容易集中精力“钻进去”，否则漫无目的学习就很容易迷失在Kubernetes的知识海洋里（[图片来源](https://www.itopstimes.com/contain/itops-times-news-digest-platform9s-kubernetes-managed-apps-kontena-pharos-2-4-and-arm-data-center-softwares-new-network-analytics-capabilities/)），也很难构建起完整的知识体系。
+
+![](images/6d808906a97a6d1c62714e3e8eca372f.png)
+
+
+
+
+
+![](images/3fea6c6830d195832b5eb46f2e2c056c.jpg)
 
 
 
