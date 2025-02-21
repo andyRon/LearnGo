@@ -9,9 +9,77 @@ https://time.geekbang.org/column/intro/100069901
 
 
 
-## 为什么你要学习etcd
+## 0 为什么要学习etcd
 
 最热门的云原生存储
+
+### etcd典型问题
+
+#### 原理
+
+为什么etcd适合读多写少？线性读和串行读各自适用什么业务场景，分别是如何实现的？
+
+如何判断etcd是否适合你的业务场景？
+
+为什么Follower节点的Raft日志条目可能会与Leader冲突？冲突时Follower节点的WAL日志如何删除已持久化但冲突的日志条目？
+
+etcd Watch机制能保证事件不丢失吗？
+
+不小心删除一个key后，可以马上找回来吗？
+
+#### 稳定性及性能
+
+哪些因素会导致Leader发生切换？
+
+为什么etcd社区压测结果显示读能达到10几万每秒，在你的业务集群中QPS可能未过百就出现超时错误了？
+
+etcd能跨地域部署吗？
+
+如何优化、提升etcd性能及稳定性？
+
+
+
+#### 一致性/延时/内存
+
+为什么基于Raft的实现etcd还会出现数据不一致？
+
+为什么集群各节点磁盘1/0延时很低，写请求也会超时呢？
+
+为什么你只存储了1个几百KB的key/value，etcd进程却可能消耗数G的内存？
+
+如何分析etcd内存和延时异常背后的原因？
+
+#### db大小
+
+为什么你删除了大量数据，db大小不减少？
+
+为什么etcd社区建议db大小不要超过8G？
+
+哪些因素会导致db大小增加？
+
+#### Kubernetes
+
+Kubernetes创建Pod背后etcd是如何工作的？
+
+etcd如何为Kubernetes控制器编程模型提供支撑？
+
+APIServer的"too old resource version"错误跟etcd有什么关系？
+
+#### 最佳实践
+
+当你在一个namespace下创建了数万个Pod/CRD资源时，同时频繁通过标签去查询指定Pod/CRD资源时，Apiserver和etcd为什么扛不住？
+
+快速增长的业务应如何避免单etcd集群出现性能瓶颈？
+
+如何构建安全、高可靠的etcd集群运维体系？
+
+
+
+### 怎么学etcd
+
+
+
+
 
 
 
@@ -42,6 +110,17 @@ https://time.geekbang.org/column/intro/100069901
 
 
 ![](images/172120c29b6c431abbd9f0970a263ed7.jpg)
+
+
+
+### 小结
+
+- etcd诞生背景， etcd v2源自CoreOS团队遇到的服务协调问题。
+- etcd目标，我们通过实际业务场景分析，得到理想中的协调服务核心目标：高可用、数据一致性、Watch、良好的可维护性等。而在CoreOS团队看来，高可用、可维护性、适配云、简单的API、良好的性能对他们而言是非常重要的，ZooKeeper无法满足所有诉求，因此决定自己构建一个分布式存储服务。
+- 介绍了v2基于目录的层级数据模型和API，并从分布式系统的角度给你详细总结了etcd v2技术点。etcd的高可用、Watch机制与Kubernetes期望中的元数据存储是匹配的。etcd v2在Kubernetes的带动下，获得了广泛的应用，但也出现若干性能和稳定性、功能不足问题，无法满足Kubernetes项目发展的需求。
+- CoreOS团队未雨绸缪，从问题萌芽时期就开始构建下一代etcd v3存储模型，分别从性能、稳定性、功能上等成功解决了Kubernetes发展过程中遇到的瓶颈，也捍卫住了作为Kubernetes存储组件的地位。
+
+
 
 
 
@@ -95,25 +174,55 @@ https://time.geekbang.org/column/intro/100069901
 
 
 
+### 小结
+
+一个读请求从client通过Round-robin负载均衡算法，选择一个etcd server节点，发出gRPC请求，经过etcd server的KVServer模块、线性读模块、MVCC的treeIndex和boltdb模块紧密协作，完成了一个读请求。
+
+
+
 ## 3 基础架构：etcd一个写请求是如何执行的？
 
 ### 整体架构
 
+![](images/8a1bf520d37e4984a1a2e00055b93ad8.jpg)
+
 ### Quota模块
+
+
 
 ### KVServer模块
 
-Preflight Check
-Propose
+#### Preflight Check
+
+![](images/e61a811445f448168669c1cdf51c0ea4.jpg)
+
+#### Propose
+
+
+
+
 
 ### WAL模块
 
+
+
+![](images/8536a64bd93d4f9c88669b24e07b9429.jpg)
+
+
+
 ### Apply模块
+
+
+
+![](images/f336a2aeb33c4087bc51fb2265851617.jpg)
 
 ### MVCC
 
-treeIndex
-boltdb
+#### treeIndex
+
+![](images/f4b61a50243b4d96966d54e794fa1857.jpg)
+
+#### boltdb
 
 
 
@@ -122,17 +231,63 @@ boltdb
 
 ### 如何避免单点故障
 
-多副本复制是如何实现的呢？
-如何解决以上复制算法的困境呢？
+#### 多副本复制是如何实现的呢？
+
+
+
+#### 如何解决以上复制算法的困境呢？
+
+共识算法
+
+![](images/c18b8af3da54499595afd6e7b0f850f1.jpg)
+
+
 
 ### Leader选举
 
+
+
+- Follower，跟随者， 同步从Leader收到的日志，etcd启动的时候默认为此状态；
+- Candidate，竞选者，可以发起Leader选举；
+- Leader，集群领导者， 唯一性，拥有同步日志的特权，需定时广播心跳给Follower节点，以维持领导者身份。
+
+![](images/0e1a351b1bbb4570b5b725986cdcd64c.jpg)
+
+
+
+![](images/fa4a39500272438a9206016c63e23bd0.jpg)
+
+![](images/876fd2934300467f9beffa4d160e02bb.jpg)
+
 ### 日志复制
+
+
+
+![](images/40868fea5c2f4d74b2fe89a02b912afe.jpg)
+
+
+
+![](images/7a75a5cc5a85494da4b5ed06c9011743.jpg)
+
+
+
+![](images/aec1c78f4adb4d7bbaea3dc1490ea8f7.jpg)
+
+
+
+
 
 ### 安全性
 
-选举规则
-日志复制规则
+#### 选举规则
+
+
+
+#### 日志复制规则
+
+
+
+
 
 ## 5 鉴权：如何保护你的数据安全？
 
@@ -143,6 +298,10 @@ boltdb
 
 
 ![](images/image-20240722102526751.png)
+
+
+
+![](images/97f8d63714f44919a6a0099c15f9dce9.jpg)
 
 ### 认证
 
@@ -166,7 +325,9 @@ JWT Token
 
 ### 授权
 
-RBAC
+#### RBAC
+
+![](images/466d9776776b44dcbda60d985e74d705.jpg)
 
 
 
@@ -176,21 +337,29 @@ RBAC
 
 ### 什么是Lease
 
+
+
 ### Lease整体架构
 
 ![](images/image-20240722102753559.png)
 
 ### key如何关联Lease
 
+![](images/e0c43c17951c47c6a1aa79d931b81834.jpg)
+
 ### 如何优化Lease续期性能
 
+
+
 ### 如何高效淘汰过期Lease
+
+![](images/5ca65c35d15e462b81d4e0e141c2b711.jpg)
 
 ### 为什么需要checkpoint机制
 
 
 
-
+![img](images/cefb40ab1936489594ce0c8fb7c3bf98.jpg)
 
 
 
@@ -202,17 +371,41 @@ MVCC（Multiversion concurrency control），一个基于多版本技术实现�
 
 
 
+![](images/d358dfd543cb4850a5dbff162cfb3ce3.jpg)
+
 ### MVCC特性初体验
+
+
 
 ### 整体架构
 
 ![](images/image-20240722103102909.png)
 
+
+
+![](images/fc4826f9b066407ea459901e474b9f96.jpg)
+
 ### treeIndex原理
+
+
+
+![](images/e5016bf0d1d14223898650caeb24f38b.jpg)
 
 ### MVCC更新key原理
 
+
+
+![](images/62ed6285b88d49669ac0b609a7dc4183.jpg)
+
+
+
+![](images/7daaec6d5cb44cf0bfabeff72fb769d1.jpg)
+
 ### MVCC查询key原理
+
+![](images/d56c6993c4594cc09606c86efbf6f9aa.jpg)
+
+
 
 ### MVCC删除key原理
 
@@ -226,18 +419,57 @@ MVCC（Multiversion concurrency control），一个基于多版本技术实现�
 
 ### Watch特性初体验
 
+
+
 ### 轮询 vs 流式推送
+
+
+
+HTTP/2协议为什么能实现多路复用呢？
+
+![](images/921126b18ecc490482cb8e2f53dfbde6.jpg)
+
+
+
+![](images/c398ea7f2db44ef2ad915dbb8d975aca.jpg)
+
+
 
 ### 滑动窗口 vs MVCC
 
+
+
+
+
 ### 可靠的事件推送机制
 
-整体架构
-最新事件推送机制
-异常场景重试机制
-历史事件推送机制
+#### 整体架构
+
+![](images/fcaf297af3e54db682e16bc12b4ea53f.jpg)
+
+#### 最新事件推送机制
+
+![](images/ee84a1ee45d54f4489144352c8c1c356.jpg)
+
+
+
+#### 异常场景重试机制
+
+
+
+![](images/f8e5ba780012421985394ebc2f9f74e5.jpg)
+
+#### 历史事件推送机制
+
+
+
+![](images/b6604133cb63450090339a289ab64921.jpg)
 
 ### 高效的事件匹配
+
+
+
+![](images/d75f2ebf9ddf4ea692fb2366904c7bf9.jpg)
 
 
 
@@ -245,21 +477,43 @@ MVCC（Multiversion concurrency control），一个基于多版本技术实现�
 
 ## 9 事务：如何安全地实现多key操作？
 
-### 事务特性初体验及API
+### 9.1 事务特性初体验及API
 
-### 整体流程
 
-### 事务ACID特性
 
-原子性与持久性
-T1时间点
-T2时间点
-一致性
-隔离性
-未提交读
-已提交读、可重复读
-串行化快照隔离
-转账案例应用
+### 9.2 整体流程
+
+![](images/249a0011e4f14c1fb2cb7f1374457f57.jpg)
+
+### 9.3 事务ACID特性
+
+#### 原子性与持久性
+
+##### T1时间点
+
+##### T2时间点
+
+
+
+#### 一致性
+
+
+
+#### 隔离性
+
+##### 未提交读
+
+![](images/c9a0d31ce8404d9a99183cc24e214c25.jpg)
+
+##### 已提交读、可重复读
+
+
+
+##### 串行化快照隔离
+
+![](images/58101ce54d0b4443afda7e5f9498ed32.jpg)
+
+#### 转账案例应用
 
 
 
@@ -267,40 +521,125 @@ T2时间点
 
 ## 10 boltdb：如何持久化存储你的key-value数据？
 
-### boltdb磁盘布局
+### 10.1 boltdb磁盘布局
 
-### boltdb API
+![](images/763a86689ff442b09d83e25c11f97020.jpg)
 
-### 核心数据结构介绍
-
-page磁盘页结构
-meta page数据结构
-meta page十六进制分析
-bucket数据结构
-leaf page
-branch page
-freelist
+### 10.2 boltdb API
 
 
 
-### Open原理
+### 10.3 核心数据结构介绍
 
-### Put原理
+![](images/e3a3cb8928184b45b8a91f9cc6ceec8d.jpg)
 
-### 事务提交原理
+#### page磁盘页结构
 
 
+
+#### meta page数据结构
+
+
+
+#### meta page十六进制分析
+
+
+
+#### bucket数据结构
+
+
+
+#### leaf page
+
+![](images/40bb4c51c86c467a869e1f8a59abf43d.jpg)
+
+#### branch page
+
+![](images/479cf04d21b343da8a910de74d5d13f8.jpg)
+
+#### freelist
+
+
+
+![](images/2e449b65324e432ba4a5fcc9956fbccf.jpg)
+
+### 10.4 Open原理
+
+
+
+### 10.5 Put原理
+
+
+
+![](images/3248386292f14e448118a238f533013c.jpg)
+
+### 10.6 事务提交原理
+
+![](images/2e7640b9ea0748969462e92d7c4f334c.jpg)
+
+
+
+![](images/e14ff9a426944a509df86be460eda6b5.jpg)
 
 
 
 ## 11 压缩：如何回收旧版本数据？
 
-整体架构
-压缩特性初体验
-周期性压缩
-版本号压缩
-压缩原理
-为什么压缩后db大小不减少呢?
+### 整体架构
+
+![](images/2547a55287cd4beca47be9c9daeaa1dc.jpg)
+
+### 压缩特性初体验
+
+
+
+### 周期性压缩
+
+
+
+### 版本号压缩
+
+
+
+### 压缩原理
+
+
+
+![](images/db8584924a544554a5e1c2ac39216ad3.jpg)
+
+
+
+
+
+![](images/3146c84203c74156995b1b838b7d9c77.jpg)
+
+
+
+
+
+![](images/e95db07822f34d29a4f901a516b2295b.jpg)
+
+### 为什么压缩后db大小不减少呢?
+
+
+
+
+
+### 小结
+
+etcd压缩操作可通过API人工触发，也可以配置压缩模式由etcd server自动触发。压缩模式支持按周期和版本两种。在周期模式中你可以实现保留最近一段时间的历史版本数，在版本模式中你可以实现保留期望的历史版本数。
+
+压缩的核心工作原理分为两大任务，第一个任务是压缩treeIndex中的各key历史索引，清理已删除key，并将有效的版本号保存到map数据结构中。
+
+第二个任务是删除boltdb中的无效key。基本原理是根据版本号遍历boltdb已压缩区间范围的key，通过treeIndex返回的有效索引map数据结构判断key是否有效，无效则通过boltdb API删除它。
+
+最后在执行压缩的操作中，虽然我们删除了boltdb db的key-value数据，但是db大小并不会减少。db大小不变的原因是存放key-value数据的branch和leaf页，它们释放后变成了空闲页，并不会将空间释放给磁盘。
+
+boltdb通过freelist page来管理一系列空闲页，后续新增的写请求优先从freelist中申请空闲页使用，以提高性能。在写请求速率稳定、新增key-value较少的情况下，压缩操作释放的空闲页就可以基本满足后续写请求对空闲页的需求，db大小就会处于一个基本稳定、健康的状态。
+
+
+
+
 
 
 
@@ -310,43 +649,165 @@ freelist
 
 ### 从消失的Node说起
 
+
+
 ### 一步步解密真相
+
+![](images/33d9eecd1b3a4c3e95b5d2b3ef7ba160.jpg)
+
+
 
 ### 为什么会不一致
 
+
+
+
+
 ### 其他典型不一致Bug
+
+
 
 ### 最佳实践
 
-开启etcd的数据毁坏检测功能
-应用层的数据一致性检测
-定时数据备份
-良好的运维规范
+#### 开启etcd的数据毁坏检测功能
+
+
+
+#### 应用层的数据一致性检测
+
+
+
+#### 定时数据备份
+
+
+
+#### 良好的运维规范
 
 
 
 ## 13 db大小：为什么etcd社区建议db大小不超过8G？
 
-分析整体思路
-构造大集群
-启动耗时
-节点内存配置
-treeIndex
-boltdb性能
-集群稳定性
-快照
+### 分析整体思路
+
+![](images/5cd6530d453f4113b3cf0efbd083a2cc.jpg)
+
+
+
+### 构造大集群
+
+
+
+![](images/7905f5f1db694429ad0e7ebb6c966083.jpg)
+
+![](images/88335638ebb345c1b6bd6e7eba348ee1.jpg)
+
+### 启动耗时
+
+
+
+### 节点内存配置
+
+
+
+### treeIndex
+
+
+
+### boltdb性能
+
+
+
+### 集群稳定性
+
+
+
+### 快照
 
 
 
 ## 14 延时：为什么你的etcd请求会出现超时？
 
-分析思路及工具
-网络
-磁盘I/O
-expensive request
-集群容量、节点CPU/Memory瓶颈
+### 分析思路及工具
+
+![](images/7df58f54f95748dbbe178135fe2baef7.jpg)
+
+
+
+![](images/bdd17ac0a4fd4a5fb237d812000d10e4.jpg)
+
+### 网络
+
+
+
+### 磁盘I/O
+
+
+
+### expensive request
+
+
+
+### 集群容量、节点CPU/Memory瓶颈
+
+
+
+
+
+### 小结
+
+会导致请求延时上升的原因：
+
+- 网络质量，如节点之间RTT延时、网卡带宽满，出现丢包；
+- 磁盘I/O抖动，会导致WAL日志持久化、boltdb事务提交出现抖动，Leader出现切换等；
+- expensive request，比如大包请求、涉及到大量key遍历、Authenticate密码鉴权等操作；
+- 容量瓶颈，太多写请求导致线性读请求性能下降等；
+- 节点配置，CPU繁忙导致请求处理延时、内存不够导致swap等。
+
+![](images/3220212f830746e68cc3980cd949cd07.jpg)
+
+分析这些案例的过程中，介绍了etcd问题核心工具：metrics、etcd log、trace日志、blktrace、pprof等。
+
+
 
 ## 15 内存：为什么你的etcd内存占用那么高？
+
+### 分析整体思路
+
+
+
+### 一个key使用数G内存的案例
+
+
+
+### raftLog
+
+![](images/a3df524496d848eeaba7cd5963c941d3.jpg)
+
+### treeIndex
+
+
+
+### boltdb
+
+
+
+### watcher
+
+
+
+![](images/7dc12f976e8f435b9312b8c6c8aca61c.jpg)
+
+### expensive request
+
+
+
+### etcd v2/goroutines/bug
+
+
+
+### 小结
+
+![](images/37bfe533ef834c1396db6ab0747fc0eb.jpg)
 
 
 
