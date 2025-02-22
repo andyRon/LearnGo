@@ -11,6 +11,8 @@ Go语言更多
 
 3️⃣[《Go语言从入门到项目实战（视频版）》](https://book.douban.com/subject/36049170/) 刘瑜 2022
 
+4️⃣ [Go语言精进之路1](https://book.douban.com/subject/35720728/) [Go语言精进之路2](https://book.douban.com/subject/35720729/)  2021
+
 ## 47 Go标准库
 
 参考：

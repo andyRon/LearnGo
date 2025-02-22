@@ -3486,7 +3486,7 @@ case关键字后面接的就不是普通意义上的表达式了，而是一个�
 
 **具名返回值**
 
-把上面的函数声明等价转换为变量声明的形式：
+把上面的函数声明等价转换为<u>变量声明的形式</u>：
 
 ![](images/image-20240704122531758.png)
 
@@ -3515,7 +3515,7 @@ f := func(){} // 使用变量声明形式的函数声明
 
 #### 函数参数的那些事儿
 
-由于函数分为**声明**与**使用**两个阶段，在不同阶段，参数的称谓也有不同。在函数声明阶段，把参数列表中的参数叫做**形式参数**（Parameter，简称==形参==），在函数体中，使用的都是形参；而在函数实际调用时传入的参数被称为**实际参数**（Argument，简称==实参==）。
+由于函数分为**声明**与**使用**两个阶段，在不同阶段，参数的称谓也有不同。在函数声明阶段，把参数列表中的参数叫做**形式参数**（==Parameter==，简称==形参==），在函数体中，使用的都是形参；而在函数实际调用时传入的参数被称为**实际参数**（==Argument==，简称==实参==）。
 
 ![](images/image-20240704123547073.png)
 
@@ -3523,9 +3523,9 @@ f := func(){} // 使用变量声明形式的函数声明
 
 Go语言中，函数参数传递采用是值传递的方式。所谓“**==值传递==**”，就是将实际参数在内存中的表示**==逐位拷贝==（Bitwise Copy）**到形式参数中。对于像**整型、数组、结构体**这类类型，它们的内存表示就是它们自身的数据内容，因此当这些类型作为实参类型时，值传递拷贝的就是它们自身，传递的开销也与它们自身的大小成正比。
 
-但是像**string、切片、map**这些类型就不是了，它们的内存表示对应的是它们数据内容的“描述符”。当这些类型作为实参类型时，值传递拷贝的也是它们数据内容的“描述符”，不包括数据内容本身，所以这些类型传递的开销是**固定**的，与数据内容大小无关。这种只拷贝“描述符”，不拷贝实际数据内容的拷贝过程，也被称为“**浅拷贝**”。
+但是像**string、切片、map**这些类型就不是了，它们的内存表示对应的是它们**数据内容的“==描述符==”**。当这些类型作为实参类型时，值传递拷贝的也是它们数据内容的“描述符”，不包括数据内容本身，所以这些类型传递的开销是**固定**的，与数据内容大小无关。这种只拷贝“描述符”，不拷贝实际数据内容的拷贝过程，也被称为“**==浅拷贝==**”。
 
-不过函数参数的传递也有两个例外，当函数的形参为**接口类型**，或者形参是**变长参数**时，简单的值传递就不能满足要求了，这时Go编译器会介入：对于类型为接口类型的形参，Go编译器会把传递的实参赋值给对应的接口类型形参；对于为变长参数的形参，Go编译器会将零个或多个实参按一定形式转换为对应的变长形参。
+不过函数参数的传递也有两个例外，当函数的形参为**接口类型**，或者形参是**变长参数**时，简单的值传递就不能满足要求了，这时Go编译器会介入：<u>对于类型为接口类型的形参，Go编译器会把传递的实参赋值给对应的接口类型形参；对于为变长参数的形参，Go编译器会将零个或多个实参按一定形式转换为对应的变长形参。</u>
 
 那么这里，零个或多个传递给变长形式参数的实参，被Go编译器转换为何种形式了呢？
 
@@ -3564,9 +3564,9 @@ func foo() (int, string, error)  // 有2或2个以上返回值
 
 > 日常编码中，究竟该使用普通返回值形式，还是具名返回值形式呢？
 > 
-> **Go标准库以及大多数项目代码中的函数，都选择了使用普通的非具名返回值形式**。但在一些特定场景下，具名返回值也会得到应用。比如，当函数使用defer，而且还在defer函数中修改外部函数返回值时，具名返回值可以让代码显得更优雅清晰。
+> **Go标准库以及大多数项目代码中的函数，都选择了使用普通的非具名返回值形式**。但在一些特定场景下，具名返回值也会得到应用。比如，<u>当函数使用defer，而且还在defer函数中修改外部函数返回值时</u>，具名返回值可以让代码显得更优雅清晰。
 > 
-> 当函数的返回值个数较多时，每次显式使用return语句时都会接一长串返回值，这时，用具名返回值可以让函数实现的可读性更好一些:
+> <u>当函数的返回值个数较多时</u>，每次显式使用return语句时都会接一长串返回值，这时，用具名返回值可以让函数实现的可读性更好一些:
 > 
 > ```go
 > // $GOROOT/src/time/format.go
@@ -3595,7 +3595,7 @@ func foo() (int, string, error)  // 有2或2个以上返回值
 
 > wiki发明人、C2站点作者[沃德·坎宁安(Ward Cunningham)](http://c2.com/)对“一等公民”的[解释](http://wiki.c2.com//?FirstClass)：
 > 
-> 如果一门编程语言对某种语言元素的创建和使用没有限制，我们可以**像对待值（value）一样对待**这种语法元素，那么我们就称这种语法元素是这门编程语言的“一等公民”。拥有“一等公民”待遇的语法元素可以存储在变量中，可以作为参数传递给函数，可以在函数内部创建并可以作为返回值从函数返回。
+> 如果一门编程语言对某种语言元素的**创建和使用没有限制**，我们可以**像对待值（value）一样对待**这种语法元素，那么我们就称这种语法元素是这门编程语言的“一等公民”。拥有“一等公民”待遇的语法元素可以存储在变量中，可以作为参数传递给函数，可以在函数内部创建并可以作为返回值从函数返回。
 
 #### 特征一：Go函数可以存储在变量中
 
@@ -3612,7 +3612,7 @@ func main() {
 }
 ```
 
-#### 特征二：支持在函数内创建并通过返回值返回。
+#### 特征二：支持在函数内创建并通过返回值返回。 🔖
 
 ```go
 func setup(task string) func() {
@@ -3629,7 +3629,7 @@ func main() {
 }
 ```
 
-这个例子，模拟了执行一些重要逻辑之前的上下文建立（setup），以及之后的上下文拆除（teardown）。在一些单元测试的代码中，我们也经常会在执行某些用例之前，建立此次执行的上下文（setup），并在这些用例执行后拆除上下文（teardown），避免这次执行对后续用例执行的干扰。
+这个例子，模拟了执行一些重要逻辑之前的上下文建立（==setup==），以及之后的上下文拆除（==teardown==）。在一些单元测试的代码中，我们也经常会在执行某些用例之前，建立此次执行的上下文（setup），并在这些用例执行后拆除上下文（teardown），避免这次执行对后续用例执行的干扰。
 
 在这个例子中，在setup函数中创建了这次执行的上下文拆除函数，并通过返回值的形式，将这个拆除函数返回给了setup函数的调用者。setup函数的调用者，在执行完对应这次执行上下文的重要逻辑后，再调用setup函数返回的拆除函数，就可以完成对上下文的拆除了。
 
@@ -3657,7 +3657,7 @@ type HandlerFunc func(ResponseWriter, *Request)
 type visitFunc func(ast.Node) ast.Visitor
 ```
 
-### 21.3 函数“一等公民”特性的高效运用🔖
+### 21.3 函数“一等公民”特性的高效运用 🔖
 
 #### 应用一：函数类型的妙用
 
@@ -3691,6 +3691,8 @@ type Handler interface {
 
 
 #### 应用二：利用闭包简化函数调用。
+
+
 
 ### 思考题
 
@@ -3731,9 +3733,9 @@ C这种错误处理机制的缺点：
 func Fprintf(w io.Writer, format string, a ...interface{}) (n int, err error)
 ```
 
-Go语言惯用法，是使用error这个接口类型表示错误，并且按惯例，通常将error类型返回值放**在返回值列表的末尾**。
+Go语言惯用法，是使用error这个接口类型表示错误，并且按惯例，通常将error类型返回值放**在返回值列表的==末尾==**。
 
-### 22.2 error类型与错误值构造 🔖
+### 22.2 error类型与错误值构造
 
 > `error`接口类型究竟如何表示错误？
 
@@ -3753,7 +3755,7 @@ err := errors.New("your first demo error")
 errWithCtx = fmt.Errorf("index %d is out of bounds", i)
 ```
 
-未导出的类型就是`errors.errorString`:
+都返回的是同一个实现了error接口的类型的实例，未导出的类型就是`errors.errorString`:
 
 ```go
 // $GOROOT/src/errors/errors.go
@@ -4176,31 +4178,139 @@ func bar() {
 
 所以，**针对各种应用对panic忍受度的差异，采取的应对panic的策略也应该有不同**。
 
-🔖
+像后端HTTP服务器程序这样的任务关键系统，就需要在特定位置捕捉并恢复panic，以保证服务器整体的健壮度。在这方面，Go标准库中的http server就是一个典型的代表。
+
+Go标准库提供的http server采用的是，每个客户端连接都使用一个单独的Goroutine进行处理的并发处理模型。也就是说，客户端一旦与http server连接成功，http server就会为这个连接新创建一个Goroutine，并在这Goroutine中执行对应连接（conn）的serve方法，来处理这条连接上的客户端请求。
+
+**无论在哪个Goroutine中发生未被恢复的panic，整个程序都将崩溃退出**。所以，为了保证处理某一个客户端连接的Goroutine出现panic时，不影响到http server主Goroutine的运行，Go标准库在serve方法中加入了对panic的捕捉与恢复，下面是serve方法的部分代码片段：
+
+```go
+// $GOROOT/src/net/http/server.go
+// Serve a new connection.
+func (c *conn) serve(ctx context.Context) {
+    c.remoteAddr = c.rwc.RemoteAddr().String()
+    ctx = context.WithValue(ctx, LocalAddrContextKey, c.rwc.LocalAddr())
+    defer func() {
+        if err := recover(); err != nil && err != ErrAbortHandler {
+            const size = 64 << 10
+            buf := make([]byte, size)
+            buf = buf[:runtime.Stack(buf, false)]
+            c.server.logf("http: panic serving %v: %v\n%s", c.remoteAddr, err, buf)
+        }
+        if !c.hijacked() {
+            c.close()
+            c.setState(c.rwc, StateClosed, runHooks)
+        }
+    }()
+    ... ...
+}
+```
+
+serve方法在一开始处就设置了defer函数，并在该函数中捕捉并恢复了可能出现的panic。这样，即便处理某个客户端连接的Goroutine出现panic，处理其他连接Goroutine以及http server自身都不会受到影响。
+
+这种**局部不要影响整体**的异常处理策略，在很多并发程序中都有应用。并且，捕捉和恢复panic的位置通常都在子Goroutine的起始处，这样设置可以捕捉到后面代码中可能出现的所有panic，就像serve方法中那样。
 
 #### 第二点：提示潜在bug
 
-🔖
+有了对panic忍受度的评估，panic是不是也没有那么“恐怖”了呢？而且，甚至可以借助panic来帮助快速找到潜在bug。
+
+C语言中有个很好用的辅助函数，断言（assert宏）。在使用C编写代码时，我们经常在一些代码执行路径上，使用断言来表达这段执行路径上某种条件一定为真的信心。断言为真，则程序处于正确运行状态，断言为否就是出现了意料之外的问题，而这个问题很可能就是一个潜在的bug，这时我们可以借助断言信息快速定位到问题所在。
+
+不过，Go语言标准库中并没有提供断言之类的辅助函数，但我们可以使用panic，部分模拟断言对潜在bug的提示功能。比如，下面就是标准库`encoding/json`包使用panic指示潜在bug的一个例子：
+
+```go
+// $GOROOT/src/encoding/json/decode.go
+... ...
+//当一些本不该发生的事情导致我们结束处理时，phasePanicMsg将被用作panic消息
+//它可以指示JSON解码器中的bug，或者
+//在解码器执行时还有其他代码正在修改数据切片。
+
+const phasePanicMsg = "JSON decoder out of sync - data changing underfoot?"
+
+func (d *decodeState) init(data []byte) *decodeState {
+    d.data = data
+    d.off = 0
+    d.savedError = nil
+    if d.errorContext != nil {
+        d.errorContext.Struct = nil
+        // Reuse the allocated space for the FieldStack slice.
+        d.errorContext.FieldStack = d.errorContext.FieldStack[:0]
+    }
+    return d
+}
+
+func (d *decodeState) valueQuoted() interface{} {
+    switch d.opcode {
+    default:
+        panic(phasePanicMsg)
+
+    case scanBeginArray, scanBeginObject:
+        d.skip()
+        d.scanNext()
+
+    case scanBeginLiteral:
+        v := d.literalInterface()
+        switch v.(type) {
+        case nil, string:
+            return v
+        }
+    }
+    return unquotedValue{}
+}
+```
+
+在`valueQuoted`这个方法中，如果程序执行流进入了default分支，那这个方法就会引发panic，这个panic会提示开发人员：这里很可能是一个bug。
+
+同样，在json包的encode.go中也有使用panic做潜在bug提示的例子：
+
+```go
+// $GOROOT/src/encoding/json/encode.go
+
+func (w *reflectWithString) resolve() error {
+    ... ...
+    switch w.k.Kind() {
+    case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+        w.ks = strconv.FormatInt(w.k.Int(), 10)
+        return nil
+    case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+        w.ks = strconv.FormatUint(w.k.Uint(), 10)
+        return nil
+    }
+    panic("unexpected map key type")
+}
+```
+
+`resolve`方法的最后一行代码就相当于一个“代码逻辑不会走到这里”的断言。一旦触发“断言”，这很可能就是一个潜在bug。
+
+去掉这行代码并不会对`resolve`方法的逻辑造成任何影响，但真正出现问题时，开发人员就缺少了“断言”潜在bug提醒的辅助支持了。
 
 在Go标准库中，**大多数panic的使用都是充当类似断言的作用的**。
 
-#### 第三点：不要混淆异常与错误
+#### 第三点：不要混淆异常与错误 🔖
 
-### 23.4 使用defer简化函数实现
+
+
+### 23.4 使用defer简化函数实现 🔖
 
 Go语言引入defer的初衷，就是解决这些问题。那么，defer具体是怎么解决这些问题的呢？或者说，defer具体的运作机制是怎样的呢？
 
 ![](images/image-20240710100648693.png)
 
-### 23.5 defer使用的几个注意事项
+### 23.5 defer使用的几个注意事项 🔖
 
 defer不仅可以用来**捕捉和恢复panic**，还能让函数变得**更简洁和健壮**。
 
 #### 第一点：明确哪些函数可以作为deferred函数
 
+
+
 #### 第二点：注意defer关键字后面表达式的求值时机
 
+
+
 #### 第三点：知晓defer带来的性能损耗
+
+
 
 
 
