@@ -813,69 +813,167 @@ boltdb通过freelist page来管理一系列空闲页，后续新增的写请求�
 
 ## 16 性能及稳定性（上）：如何优化及扩展etcd性能？
 
-性能分析链路
-负载均衡
-选择合适的鉴权
-选择合适的读模式
-线性读实现机制、网络延时
-磁盘IO性能、写QPS
-RBAC规则数、Auth锁
-expensive request、treeIndex锁
-大key-value、boltdb锁
+### 性能分析链路
+
+
+
+### 负载均衡
+
+
+
+### 选择合适的鉴权
+
+
+
+### 选择合适的读模式
+
+
+
+### 线性读实现机制、网络延时
+
+
+
+### 磁盘IO性能、写QPS
+
+
+
+### RBAC规则数、Auth锁
+
+
+
+### expensive request、treeIndex锁
+
+
+
+### 大key-value、boltdb锁
 
 
 
 ## 17 性能及稳定性（下）：如何优化及扩展etcd性能？
 
-性能分析链路
-db quota
-限速
-心跳及选举参数优化
-网络和磁盘IO延时
-快照参数优化
-大value
-boltdb锁
+### 性能分析链路
 
-扩展性能
-扩展读
-扩展Watch
-扩展Lease
+![img](images/b74bfd851eb9469e96cc2de25b023387.jpg)
+
+### db quota
+
+
+
+### 限速
+
+
+
+### 心跳及选举参数优化
+
+
+
+### 网络和磁盘IO延时
+
+
+
+### 快照参数优化
+
+
+
+### 大value
+
+
+
+### boltdb锁
+
+
+
+
+
+### 扩展性能
+
+![](images/b57fec5da1e3468eaba73d99fc963f54.jpg)
+
+#### 扩展读
+
+#### 扩展Watch
+
+#### 扩展Lease
+
+
+
+### 小结
+
+![img](https://learn.lianglianglee.com/%e4%b8%93%e6%a0%8f/etcd%e5%ae%9e%e6%88%98%e8%af%be/assets/24f30f5b76204d24b83d39db1b345aaf.jpg)
 
 
 
 ## 18 实战：如何基于Raft从0到1构建一个支持多存储引擎分布式KV服务？
 
-### 整体架构设计
+### 18.1 整体架构设计
 
-API设计
-复制状态机
-多存储引擎
-boltdb
-leveldb
+#### API设计
 
-### 实现分析
+#### 复制状态机
 
-Raft算法库
-Raft API
-支持多存储引擎
-boltdb
-leveldb
-读写流程
-写流程
-读流程
+#### 多存储引擎
+
+##### boltdb
+
+##### leveldb
+
+
+
+### 18.2 实现分析
+
+#### Raft算法库
+
+
+
+##### Raft API
+
+
+
+#### 支持多存储引擎
+
+##### boltdb
+
+##### leveldb
+
+
+
+#### 读写流程
+
+##### 写流程
+
+##### 读流程
 
 
 
 ## 19 Kubernetes基础应用：创建一个Pod背后etcd发生了什么？
 
-Kubernetes基础架构
-创建Pod案例
-kube-apiserver请求执行链路
-Kubernetes资源存储格式
-通用存储模块
-资源安全创建及更新
-Watch机制在Kubernetes中应用
-Resource Version与etcd版本号
+### Kubernetes基础架构
+
+
+
+### 创建Pod案例
+
+
+
+### kube-apiserver请求执行链路
+
+
+
+### Kubernetes资源存储格式
+
+
+
+### 通用存储模块
+
+
+
+#### 资源安全创建及更新
+
+
+
+### Watch机制在Kubernetes中应用
+
+#### Resource Version与etcd版本号
 
 
 
@@ -883,18 +981,37 @@ Resource Version与etcd版本号
 
 ## 20 Kubernetes高级应用：如何优化业务场景使etcd能支撑上万节点集群？
 
-大集群核心问题分析
-如何减少expensive request
-分页
-资源按namespace拆分
-Informer机制
-Watch bookmark机制
-更高效的Watch恢复机制
-如何控制db size
-如何优化key-value大小
-etcd优化
-并发读特性
-改善Watch Notify机制
+### 大集群核心问题分析
+
+
+
+### 如何减少expensive request
+
+#### 分页
+
+#### 资源按namespace拆分
+
+#### Informer机制
+
+#### Watch bookmark机制
+
+#### 更高效的Watch恢复机制
+
+
+
+### 如何控制db size
+
+
+
+### 如何优化key-value大小
+
+
+
+### etcd优化
+
+#### 并发读特性
+
+#### 改善Watch Notify机制
 
 
 
@@ -914,14 +1031,29 @@ etcd优化
 
 主备切换、脑裂是Redis分布式锁的两个典型不安全的因素，本质原因是Redis为了满足高性能，采用了主备异步复制协议，同时也与负责主备切换的Redis Sentinel服务是否合理部署有关。
 
+![](images/9aa7910742334a1696efe78aeac7f130.jpg)
+
+
+
+![](images/9b60f16fcc354d8b82330269050c1922.jpg)
+
+
+
 ### 分布式锁常见实现方案
+
+
+
+
 
 ### etcd分布式锁实现
 
-事务与锁的安全性
-Lease与锁的活性
-Watch与锁的可用性
-etcd自带的concurrency包
+#### 事务与锁的安全性
+
+#### Lease与锁的活性
+
+#### Watch与锁的可用性
+
+#### etcd自带的concurrency包
 
 
 
@@ -929,13 +1061,44 @@ etcd自带的concurrency包
 
 ## 22 配置及服务发现：解析etcd在API Gateway开源项目中应用
 
-服务发现
-单体架构
-分布式及微服务架构
-为什么需要服务发现中间件?
-etcd服务发现原理
-Apache APISIX原理
-etcd在Apache APISIX中的应用
+### 服务发现
+
+#### 单体架构
+
+
+
+#### 分布式及微服务架构
+
+![img](images/f2d27285a4804bb98fb076a7e35644e7.jpg)
+
+
+
+![img](images/2d65a1d1b7244c76b99cb55d01f999f8.jpg)
+
+#### 为什么需要服务发现中间件?
+
+
+
+#### etcd服务发现原理
+
+
+
+![img](images/0162dc5974df4d669a999bec96f400c0.jpg)
+
+
+
+#### Apache APISIX原理
+
+
+
+![](images/d2de3d432d7549bba0d98a4a155bc823.jpg)
+
+
+
+![img](images/c12225e49422469aad051d5c37aa013e.jpg)
+
+#### etcd在Apache APISIX中的应用
+
 数据存储格式
 Watch机制的应用
 鉴权机制的应用
@@ -964,27 +1127,42 @@ Lease特性的应用
 
 ![](images/08408a1b5d8044e7ad84118c3b24a393.jpg)
 
-并发原语
-健康检查、服务发现
-数据模型比较
-Watch特性比较
-其他比较
+#### 并发原语
+
+#### 健康检查、服务发现
+
+#### 数据模型比较
+
+#### Watch特性比较
+
+#### 其他比较
 
 
 
 
 ## 24 运维：如何构建高可靠的etcd集群运维体系？
 
-整体解决方案
-集群部署
-集群组建
-监控及告警体系
-备份及还原
-巡检
-高可用及自愈
-混沌工程
+### 整体解决方案
+
+![](images/c2c3f6dbba5a4d259e974c3d08115e80.jpg)
+
+### 集群部署
+
+### 集群组建
+
+### 监控及告警体系
+
+### 备份及还原
+
+### 巡检
+
+### 高可用及自愈
 
 
+
+### 混沌工程
+
+![img](images/b70f2d0fb50444f69381ec7d9c7c8d58.jpg)
 
 
 
@@ -1001,5 +1179,7 @@ Watch特性比较
 新集群如何组建
 如何从备份恢复集群
 故障分析
+
+
 
 ## 搞懂etcd，掌握通往分布式存储系统之门的钥匙
