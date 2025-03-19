@@ -346,11 +346,61 @@ Mutex的架构演进分成了四个阶段：
 
 ## 3 Mutex：4种易错场景大盘点
 
+### 常见的4种错误场景
+
+#### Lock/Unlock不是成对出现
+
+
+
+#### Copy已使用的Mutex
+
+
+
+#### 重入
+
+
+
+#### 死锁
+
+
+
+### 流行的Go开发项目踩坑记
+
+#### Docker
+
+
+
+#### Kubernetes
+
+
+
+
+
+#### gRPC
+
+
+
+
+
 
 
 ## 4 Mutex：骇客编程，如何拓展额外功能？
 
+锁是性能下降的“罪魁祸首”之一，所以，有效地降低锁的竞争，就能够很好地提高性能。因此，监控关键互斥锁上等待的goroutine的数量，是我们分析锁竞争的激烈程度的一个重要指标。
 
+### TryLock
+
+![](images/image-20250320005250024.png)
+
+
+
+### 获取等待者的数量等指标
+
+
+
+
+
+### 使用Mutex实现一个线程安全的队列
 
 
 
@@ -360,17 +410,111 @@ Mutex的架构演进分成了四个阶段：
 
 ## 5 RWMutex：读写锁的实现原理及避坑指南
 
+Go标准库中的RWMutex（读写锁）就是用来解决这类readers-writers问题的。
+
+### 什么是RWMutex？
+
+
+
+### RWMutex的实现原理
+
+RWMutex是基于Mutex实现的。
+
+
+
+
+
+### RLock/RUnlock的实现
+
+
+
+### Lock
+
+
+
+### Unlock
+
+
+
+### RWMutex的3个踩坑点
+
+#### 坑点1：不可复制
+
+
+
+#### 坑点2：重入导致死锁
+
+![](images/image-20250320005549798.png)
+
+#### 坑点3：释放未加锁的RWMutex
+
+
+
+### 流行的Go开发项目中的坑
+
+
+
+
+
 
 
 ![](images/image-20250221004031246.png)
 
 ## 6 WaitGroup：协同等待，任务编排利器
 
+### WaitGroup的基本用法
+
+```go
+func (wg *WaitGroup) Add(delta int)		// 用来设置WaitGroup的计数值
+func (wg *WaitGroup) Done()  // 用来将WaitGroup的计数值减1，其实就是调用了Add(-1)
+func (wg *WaitGroup) Wait()   // 调用这个方法的goroutine会一直阻塞，直到WaitGroup的计数值变为0
+```
+
+
+
+### WaitGroup的实现
+
+
+
+
+
+### 使用WaitGroup时的常见错误
+
+#### 常见问题一：计数器设置为负值
+
+
+
+#### 常见问题二：不期望的Add时机
+
+
+
+#### 常见问题三：前一个Wait还没结束就重用WaitGroup
+
+
+
+### noCopy：辅助vet检查
+
+
+
+
+
+### 流行的Go开发项目中的坑
+
+
+
+
+
 
 
 ![](images/image-20250221004119175.png)
 
 ## 7 Cond：条件变量的实现机制及避坑指南
+
+
+
+### Cond的基本用法
+
+
 
 
 
@@ -393,6 +537,24 @@ Mutex的架构演进分成了四个阶段：
 
 
 ## 10 Pool：性能提升大杀器
+
+### sync.Pool的特点
+
+
+
+
+
+### sync.Pool的使用方法
+
+
+
+### 实现原理
+
+
+
+![](images/image-20250320010253386.png)
+
+
 
 
 
@@ -428,17 +590,115 @@ Channel类型是Go语言独特的类型，因为比较新，所以难以掌握�
 
 ## 13 Channel：另辟蹊径，解决并发问题
 
+### Channel的发展
+
+
+
+
+
+### Channel的应用场景
+
+
+
+### Channel基本用法
+
+
+
+### Channel的实现原理
+
+#### chan数据结构
+
+![](images/image-20250320010544019.png)
+
+
+
+#### 初始化
+
+
+
+
+
+### 使用Channel容易犯的错误
+
+
+
 
 
 
 
 ## 14 Channel：透过代码看典型的应用模式
 
+### 使用反射操作Channel
+
+
+
+
+
+### 典型的应用场景
+
+
+
+#### 消息交流
+
+
+
+#### 信号通知
+
+
+
+#### 锁
+
+
+
+#### 任务编排
+
+Or-Done模式、扇入模式、扇出模式、Stream和map-reduce
+
+
+
 
 
 ![](images/image-20250221004656361.jpeg)
 
 ## 15 内存模型：Go如何保证并发读写的顺序？
+
+### 重排和可见性的问题
+
+
+
+### happens-before
+
+
+
+### Go语言中保证的happens-before关系
+
+#### init函数
+
+
+
+#### goroutine
+
+
+
+#### Channel
+
+
+
+#### Mutex/RWMutex
+
+
+
+#### WaitGroup
+
+
+
+#### Once
+
+
+
+#### atomic
+
+
 
 
 
