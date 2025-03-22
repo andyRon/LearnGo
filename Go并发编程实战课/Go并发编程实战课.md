@@ -41,7 +41,7 @@ Go中有一个大的方向，就是**==任务编排用Channel，共享资源保�
 
 ## 1 Mutex：如何解决资源并发访问问题？
 
-常见并发问题：多个goroutine并发更新同一个资源，像计数器；同时更新用户的账户信息；秒杀系统；往同一个buffer中并发写入数据等等。
+常见并发问题：**多个goroutine并发更新同一个资源，像计数器；同时更新用户的账户信息；秒杀系统；往同一个buffer中并发写入数据等等**。
 
 如果没有互斥控制，就会出现一些异常情况，比如计数器的计数不准确、用户的账户可能出现透支、秒杀系统出现超卖、buffer中的数据混乱，等等，后果都很严重。
 
@@ -53,7 +53,7 @@ Go中有一个大的方向，就是**==任务编排用Channel，共享资源保�
 
 在并发编程中，如果程序中的一部分会被并发访问或修改，那么，为了避免并发访问导致的意想不到的结果，这部分程序需要被保护起来，这部分被保护起来的程序，就叫做**==临界区==**。
 
-临界区就是一个被共享的资源，或者说是一个整体的一组共享资源，比如**对数据库的访问、对某一个共享数据结构的操作、对一个 I/O 设备的使用、对一个连接池中的连接的调用**，等等。
+临界区就是一个**被共享的资源**，或者说是一个整体的一组共享资源，比如**对数据库的访问、对某一个共享数据结构的操作、对一个 I/O 设备的使用、对一个连接池中的连接的调用**，等等。
 
 **使用互斥锁，限定临界区只能同时由一个线程持有。**
 
@@ -69,9 +69,9 @@ Mutex是使用最广泛的==同步原语==（Synchronization primitives，也叫
 
 同步原语的适用场景：
 
-- 共享资源。并发地读写共享资源，会出现数据竞争（data race）的问题，所以需要Mutex、RWMutex这样的并发原语来保护。
-- 任务编排。需要goroutine按照一定的规律执行，而goroutine之间有相互等待或者依赖的顺序关系，我们常常使用WaitGroup或者Channel来实现。
-- 消息传递。信息交流以及不同的goroutine之间的线程安全的数据交流，常常使用Channel来实现。
+- ==共享资源==。并发地读写共享资源，会出现数据竞争（data race）的问题，所以需要Mutex、RWMutex这样的并发原语来保护。
+- ==任务编排==。需要goroutine按照一定的规律执行，而goroutine之间有相互等待或者依赖的顺序关系，我们常常使用WaitGroup或者Channel来实现。
+- ==消息传递==。信息交流以及不同的goroutine之间的线程安全的数据交流，常常使用Channel来实现。
 
 ### Mutex的基本使用方法
 
@@ -146,7 +146,7 @@ $ go run counter.go
 
 
 
-Go提供了一个**检测并发访问共享资源是否有问题**的工具： **race detector**，它可以帮助我们自动发现程序有没有data race的问题。
+Go提供了一个**检测并发访问共享资源是否有问题**的工具： **race detector** 🔖，它可以帮助我们自动发现程序有没有data race的问题。
 
 Go race detector是基于Google的 **C/C++ sanitizers** 技术实现的，编译器通过探测所有的内存访问，加入代码能监视对这些内存地址的访问（读还是写）。在代码运行的时候，race detector就能监控到对共享变量的非同步访问，出现race的时候，就会打印出警告信息。
 
@@ -318,19 +318,218 @@ Mutex的架构演进分成了四个阶段：
 
 ### 2.1 初版的互斥锁
 
+Russ Cox在2008年提交的第一版Mutex，通过一个flag变量，标记当前的锁是否被某个goroutine持有。如果这个flag的值是1，就代表锁已经被持有，那么，其它竞争的goroutine只能等待；如果这个flag的值是0，就可以通过==CAS（compare-and-swap，或者compare-and-set）==将这个flag设置为1，标识锁被当前的这个goroutine持有了。
 
+```go
+		// CAS操作，当时还没有抽象出atomic包
+    func cas(val *int32, old, new int32) bool
+    func semacquire(*int32)
+    func semrelease(*int32)
+    // 互斥锁的结构，包含两个字段
+    type Mutex struct {
+        key  int32 // 锁是否被持有的标识
+        sema int32 // 信号量专用，用以阻塞/唤醒goroutine
+    }
+    
+    // 保证成功在val上增加delta的值
+    func xadd(val *int32, delta int32) (new int32) {
+        for {
+            v := *val
+            if cas(val, v, v+delta) {
+                return v + delta
+            }
+        }
+        panic("unreached")
+    }
+    
+    // 请求锁
+    func (m *Mutex) Lock() {
+        if xadd(&m.key, 1) == 1 { //标识加1，如果等于1，成功获取到锁
+            return
+        }
+        semacquire(&m.sema) // 否则阻塞等待
+    }
+    
+    func (m *Mutex) Unlock() {
+        if xadd(&m.key, -1) == 0 { // 将标识减去1，如果等于0，则没有其它等待者
+            return
+        }
+        semrelease(&m.sema) // 唤醒其它阻塞的goroutine
+    }    
+```
+
+> **==CAS指令==**将给定的值和一个内存地址中的值进行比较，如果它们是同一个值，就使用新值替换内存地址中的值，这个操作是**原子性**的。
+>
+> 原子性保证这个指令总是基于最新的值进行计算，如果同时有其它线程已经修改了这个值，那么，CAS会返回失败。
+>
+> **CAS是实现互斥锁和同步原语的基础**。
+
+最核心的结构体（struct）和函数、方法的定义几乎与现在的一样。
+
+- 字段key：是一个flag，用来标识这个排外锁是否被某个goroutine所持有，如果key大于等于1，说明这个排外锁已经被持有；
+- 字段sema：是个信号量变量，用来控制等待goroutine的阻塞休眠和唤醒。
+
+![](images/image-20250322180258699.png)
+
+调用Lock请求锁的时候，通过`xadd`方法进行CAS操作（第24行），xadd方法通过循环执行CAS操作直到成功，保证对key加1的操作成功完成。
+
+如果比较幸运，锁没有被别的goroutine持有，那么，Lock方法成功地将key设置为1，这个goroutine就持有了这个锁；如果锁已经被别的goroutine持有了，那么，当前的goroutine会把key加1，而且还会调用`semacquire`方法（第27行），使用信号量将自己休眠，等锁释放的时候，信号量会将它唤醒。
+
+有锁的goroutine调用Unlock释放锁时，它会将key减1（第31行）。如果当前没有其它等待这个锁的goroutine，这个方法就返回了。但是，如果还有等待此锁的其它goroutine，那么，它会调用semrelease方法（第34行），利用信号量唤醒等待锁的其它goroutine中的一个。
+
+总结，初版的Mutex利用CAS原子操作，对key这个标志量进行设置。key不仅仅标识了锁是否被goroutine所持有，还记录了当前持有和等待获取锁的goroutine的数量。
+
+注意，**Unlock方法可以被任意的goroutine调用释放锁，即使是没持有这个互斥锁的goroutine，也可以进行这个操作。这是因为，Mutex本身并没有包含持有这把锁的goroutine的信息，所以，Unlock也不会对此进行检查。Mutex的这个设计一直保持至今。**
+
+🔖
 
 ### 2.2 给新人机会
+
+2011年6月30日，对Mutex做了一次大的调整：
+
+```go
+type Mutex struct {
+  state int32
+  sema  uint32
+}
+
+const (
+  mutexLocked = 1 << iota // mutex is locked
+  mutexWoken
+  mutexWaiterShift = iota
+) 
+```
+
+![](images/image-20250322180827562.png)
+
+state是一个复合型的字段，一个字段包含多个意义，这样可以通过尽可能少的内存来实现互斥锁。这个字段的第一位（最小的一位）来表示这个锁是否被持有，第二位代表是否有唤醒的goroutine，剩余的位数代表的是等待此锁的goroutine数。所以，state这一个字段被分成了三部分，代表三个数据。
+
+请求锁的方法Lock也变得复杂了:
+
+```go
+func (m *Mutex) Lock() {
+  // Fast path: 幸运case，能够直接获取到锁
+  if atomic.CompareAndSwapInt32(&m.state, 0, mutexLocked) {
+    return
+	}
+
+  awoke := false
+  for {
+    old := m.state
+    new := old | mutexLocked // 新状态加锁
+    if old&mutexLocked != 0 {
+      new = old + 1<<mutexWaiterShift //等待者数量加一
+    }
+    if awoke {
+      // goroutine是被唤醒的，
+      // 新状态清除唤醒标志
+      new &^= mutexWoken
+    }
+    if atomic.CompareAndSwapInt32(&m.state, old, new) {//设置新状态
+      if old&mutexLocked == 0 { // 锁原状态未加锁
+        break
+      }
+      runtime.Semacquire(&m.sema) // 请求信号量
+      awoke = true
+    }
+  }
+}
+```
+
+🔖
+
+![](images/image-20250322181033581.png)
+
+
+
+释放锁的Unlock方法:
+
+```go
+func (m *Mutex) Unlock() {
+  // Fast path: drop lock bit.
+  new := atomic.AddInt32(&m.state, -mutexLocked) //去掉锁标志
+  if (new+mutexLocked)&mutexLocked == 0 { //本来就没有加锁
+    panic("sync: unlock of unlocked mutex")
+  }
+
+  old := new
+  for {
+    if old>>mutexWaiterShift == 0 || old&(mutexLocked|mutexWoken) != 0 { // 没有等待者，或者有唤醒的waiter，或者锁原来已加锁
+      return
+    }
+    new = (old - 1<<mutexWaiterShift) | mutexWoken // 新状态，准备唤醒goroutine，并设置唤醒标志
+    if atomic.CompareAndSwapInt32(&m.state, old, new) {
+      runtime.Semrelease(&m.sema)
+      return
+    }
+    old = m.state
+  }
+}
+```
+
+🔖
+
+
+
+总结，相对于初版的设计，这次的改动主要就是，**新来的goroutine也有机会先获取到锁，甚至一个goroutine可能连续获取到锁，打破了先来先得的逻辑。但是，代码复杂度也显而易见。**
 
 
 
 ### 2.3 多给些机会
 
+2015年2月，如果新来的goroutine或者是被唤醒的goroutine首次获取不到锁，它们就会通过自旋（spin，通过循环不断尝试，spin的逻辑是在runtime实现的）的方式，尝试检查锁是否被释放。在尝试一定的自旋次数后，再执行原来的逻辑。
 
+```go
+func (m *Mutex) Lock() {
+  // Fast path: 幸运之路，正好获取到锁
+  if atomic.CompareAndSwapInt32(&m.state, 0, mutexLocked) {
+    return
+  }
+
+  awoke := false
+  iter := 0
+  for { // 不管是新来的请求锁的goroutine, 还是被唤醒的goroutine，都不断尝试请求锁
+    old := m.state // 先保存当前锁的状态
+    new := old | mutexLocked // 新状态设置加锁标志
+    if old&mutexLocked != 0 { // 锁还没被释放
+      if runtime_canSpin(iter) { // 还可以自旋
+        if !awoke && old&mutexWoken == 0 && old>>mutexWaiterShift != 0 &&
+        atomic.CompareAndSwapInt32(&m.state, old, old|mutexWoken) {
+          awoke = true
+        }
+        runtime_doSpin()
+        iter++
+        continue // 自旋，再次尝试请求锁
+      }
+      new = old + 1<<mutexWaiterShift
+    }
+    if awoke { // 唤醒状态
+      if new&mutexWoken == 0 {
+        panic("sync: inconsistent mutex state")
+      }
+      new &^= mutexWoken // 新状态清除唤醒标记
+    }
+    if atomic.CompareAndSwapInt32(&m.state, old, new) {
+      if old&mutexLocked == 0 { // 旧状态锁已释放，新状态成功持有了锁，直接返回
+        break
+      }
+      runtime_Semacquire(&m.sema) // 阻塞等待
+      awoke = true // 被唤醒
+      iter = 0
+    }
+  }
+}
+```
 
 
 
 ### 2.4 解决饥饿
+
+经过几次优化，Mutex的代码越来越复杂，应对高并发争抢锁的场景也更加公平。
+
+**饥饿问题**
+
+🔖
 
 
 
@@ -338,9 +537,17 @@ Mutex的架构演进分成了四个阶段：
 
 
 
+### 总结
+
+Go创始者的哲学，就是他们**强调Go语言和标准库的稳定性**，新版本要向下兼容，用新的版本总能编译老的代码。Go语言从出生到现在已经10多年了，这个Mutex对外的接口却没有变化，依然向下兼容，即使现在Go出了两个版本，每个版本也会向下兼容，保持Go语言的稳定性，你也能领悟他们软件开发和设计的思想。
 
 
 
+
+
+> 目前Mutex的state字段有几个意义，这几个意义分别是由哪些字段表示的？
+>
+> 等待一个Mutex的goroutine数最大是多少？是否能满足现实的需求？
 
 
 
