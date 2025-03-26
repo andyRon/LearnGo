@@ -553,9 +553,21 @@ Go创始者的哲学，就是他们**强调Go语言和标准库的稳定性**，
 
 ## 3 Mutex：4种易错场景大盘点
 
-### 常见的4种错误场景
 
-#### Lock/Unlock不是成对出现
+
+### 3.1 常见的4种错误场景
+
+#### 1️⃣Lock/Unlock不是成对出现
+
+
+
+- 代码中有太多的if-else分支，可能在某个分支中漏写了Unlock；
+- 在重构的时候把Unlock给删除了；
+- Unlock误写成了Lock。
+
+
+
+死锁的检查机制（checkdead() 方法）
 
 
 
@@ -569,9 +581,18 @@ Go创始者的哲学，就是他们**强调Go语言和标准库的稳定性**，
 
 #### 死锁
 
+两个或两个以上的进程（或线程，goroutine）在执行过程中，因争夺共享资源而处于一种互相等待的状态，如果没有外部干涉，它们都将无法推进下去，此时，我们称系统处于**死锁状态或系统产生了死锁**。
+
+想避免死锁，只要破坏这四个条件中的一个或者几个：
+
+- **互斥**： 至少一个资源是被排他性独享的，其他线程必须处于等待状态，直到资源被释放。
+- **持有和等待**：goroutine持有一个资源，并且还在请求其它goroutine持有的资源，也就是咱们常说的“吃着碗里，看着锅里”的意思。
+- **不可剥夺**：资源只能由持有它的goroutine来释放。
+- **环路等待**：一般来说，存在一组等待进程，P={P1，P2，…，PN}，P1等待P2持有的资源，P2等待P3持有的资源，依此类推，最后是PN等待P1持有的资源，这就形成了一个环路等待的死结
 
 
-### 流行的Go开发项目踩坑记
+
+### 3.2 流行的Go开发项目踩坑记
 
 #### Docker
 
@@ -595,19 +616,64 @@ Go创始者的哲学，就是他们**强调Go语言和标准库的稳定性**，
 
 锁是性能下降的“罪魁祸首”之一，所以，有效地降低锁的竞争，就能够很好地提高性能。因此，监控关键互斥锁上等待的goroutine的数量，是我们分析锁竞争的激烈程度的一个重要指标。
 
-### TryLock
+### 4.1 TryLock
+
+Go 1.18  为Mutex/RWMutex增加了TryLock方法
+
+当一个goroutine调用这个TryLock方法请求锁的时候，如果这把锁没有被其他goroutine所持有，那么，这个goroutine就持有了这把锁，并返回true；如果这把锁已经被其他goroutine所持有，或者是正在准备交给某个被唤醒的goroutine，那么，这个请求锁的goroutine就直接返回false，不会阻塞在方法调用上。
 
 ![](images/image-20250320005250024.png)
 
 
 
-### 获取等待者的数量等指标
+```go
+// 复制Mutex定义的常量
+const (
+    mutexLocked = 1 << iota // 加锁标识位置
+    mutexWoken              // 唤醒标识位置
+    mutexStarving           // 锁饥饿标识位置
+    mutexWaiterShift = iota // 标识waiter的起始bit位置
+)
+
+// 扩展一个Mutex结构
+type Mutex struct {
+    sync.Mutex
+}
+
+// 尝试获取锁
+func (m *Mutex) TryLock() bool {
+    // 如果能成功抢到锁
+    if atomic.CompareAndSwapInt32((*int32)(unsafe.Pointer(&m.Mutex)), 0, mutexLocked) {
+        return true
+    }
+
+    // 如果处于唤醒、加锁或者饥饿状态，这次请求就不参与竞争了，返回false
+    old := atomic.LoadInt32((*int32)(unsafe.Pointer(&m.Mutex)))
+    if old&(mutexLocked|mutexStarving|mutexWoken) != 0 {
+        return false
+    }
+
+    // 尝试在竞争的状态下请求锁
+    new := old | mutexLocked
+    return atomic.CompareAndSwapInt32((*int32)(unsafe.Pointer(&m.Mutex)), old, new)
+}
+```
 
 
 
 
 
-### 使用Mutex实现一个线程安全的队列
+
+
+### 4.2 获取等待者的数量等指标
+
+
+
+
+
+### 4.3 使用Mutex实现一个线程安全的队列
+
+
 
 
 
@@ -617,33 +683,73 @@ Go创始者的哲学，就是他们**强调Go语言和标准库的稳定性**，
 
 ## 5 RWMutex：读写锁的实现原理及避坑指南
 
-Go标准库中的RWMutex（读写锁）就是用来解决这类readers-writers问题的。
+只要有一个线程在执行写操作，其它的线程都不能执行读写操作
 
-### 什么是RWMutex？
+Go标准库中的`RWMutex`（读写锁）就是用来解决这类**readers-writers问题**的。
 
+### 5.1 什么是RWMutex？
 
+RWMutex在某一时刻只能由任意数量的reader持有，或者是只被单个的writer持有。 【reader/writer 互斥锁】
 
-### RWMutex的实现原理
+五个方法：
 
-RWMutex是基于Mutex实现的。
-
-
-
-
-
-### RLock/RUnlock的实现
+- `Lock`/`Unlock`：写操作时调用的方法。如果锁已经被reader或者writer持有，那么，Lock方法会一直阻塞，直到能获取到锁；Unlock则是配对的释放锁的方法。
+- `RLock`/`RUnlock`：读操作时调用的方法。如果锁已经被writer持有的话，RLock方法会一直阻塞，直到能获取到锁，否则就直接返回；而RUnlock是reader释放锁的方法。
+- `RLocker`：这个方法的作用是**为读操作返回一个Locker接口的对象**。它的Lock方法会调用RWMutex的RLock方法，它的Unlock方法会调用RWMutex的RUnlock方法。
 
 
 
-### Lock
+**如果你遇到可以明确区分reader和writer goroutine的场景，且有大量的并发读、少量的并发写，并且有强烈的性能需求，你就可以考虑使用读写锁RWMutex替换Mutex。**
+
+### 5.2 RWMutex的实现原理
+
+RWMutex是很常见的并发原语，很多编程语言的库都提供了类似的并发类型。
+
+RWMutex一般都是基于互斥锁、条件变量（condition variables）或者信号量（semaphores）等并发原语来实现。
+
+**Go标准库中的RWMutex是基于Mutex实现的。**
+
+readers-writers问题一般有三类，**基于对读和写操作的优先级，读写锁的设计和实现**也分成三类:
+
+- **Read-preferring**：读优先的设计可以提供很高的并发性，但是，在竞争激烈的情况下可能会导致写饥饿。这是因为，如果有大量的读，这种设计会导致只有所有的读都释放了锁之后，写才可能获取到锁。
+- **Write-preferring**：写优先的设计意味着，如果已经有一个writer在等待请求锁的话，它会阻止新来的请求锁的reader获取到锁，所以优先保障writer。当然，如果有一些reader已经请求了锁的话，新请求的writer也会等待已经存在的reader都释放锁之后才能获取。所以，写优先级设计中的优先权是针对新来的请求而言的。这种设计主要避免了writer的饥饿问题。
+- **不指定优先级**：这种设计比较简单，不区分reader和writer优先级，某些场景下这种不指定优先级的设计反而更有效，因为第一类优先级会导致写饥饿，第二类优先级可能会导致读饥饿，这种不指定优先级的访问不再区分读写，大家都是同一个优先级，解决了饥饿的问题。
+
+Go标准库中的RWMutex设计是**Write-preferring**方案。一个正在阻塞的Lock调用会排除新的reader请求到锁。
+
+RWMutex包含一个Mutex，以及四个辅助字段writerSem、readerSem、readerCount和readerWait：
+
+```go
+type RWMutex struct {
+	w           Mutex   // 互斥锁解决多个writer的竞争
+	writerSem   uint32  // writer信号量
+	readerSem   uint32  // reader信号量
+	readerCount int32   // reader的数量
+	readerWait  int32   // writer等待完成的reader的数量
+}
+
+const rwmutexMaxReaders = 1 << 30
+```
+
+- 字段w：为writer的竞争锁而设计；
+- 字段readerCount：记录当前reader的数量（以及是否有writer竞争锁）；
+- readerWait：记录writer请求锁时需要等待read完成的reader的数量；
+- writerSem 和readerSem：都是为了阻塞设计的信号量。
+- 常量rwmutexMaxReaders，定义了最大的reader数量。
+
+#### RLock/RUnlock的实现
 
 
 
-### Unlock
+#### Lock
 
 
 
-### RWMutex的3个踩坑点
+#### Unlock
+
+
+
+### 5.3 RWMutex的3个踩坑点
 
 #### 坑点1：不可复制
 
@@ -657,7 +763,7 @@ RWMutex是基于Mutex实现的。
 
 
 
-### 流行的Go开发项目中的坑
+### 5.4 流行的Go开发项目中的坑
 
 
 
@@ -667,9 +773,23 @@ RWMutex是基于Mutex实现的。
 
 ![](images/image-20250221004031246.png)
 
+
+
 ## 6 WaitGroup：协同等待，任务编排利器
 
-### WaitGroup的基本用法
+`WaitGroup`是package sync用来做任务编排的一个并发原语，解决是**并发-等待的问题**：
+
+现在有一个goroutine A 在检查点（checkpoint）等待一组goroutine全部完成，如果在执行任务的这些goroutine还没全部完成，那么goroutine A就会阻塞在检查点，直到所有goroutine都完成后才能继续执行。
+
+> 使用WaitGroup的场景:
+>
+> 比如，我们要完成一个大的任务，需要使用并行的goroutine执行三个小任务，只有这三个小任务都完成，我们才能去执行后面的任务。如果通过轮询的方式定时询问三个小任务是否完成，会存在两个问题：一是，性能比较低，因为三个小任务可能早就完成了，却要等很长时间才被轮询到；二是，会有很多无谓的轮询，空耗CPU资源。
+>
+> 那么，这个时候使用WaitGroup并发原语就比较有效了，它可以阻塞等待的goroutine。等到三个小任务都完成了，再即时唤醒它们。
+
+其实，很多**操作系统和编程语言**都提供了类似的并发原语。比如，**Linux中的barrier、Pthread（POSIX线程）中的barrier、C++中的std::barrier、Java中的CyclicBarrier和CountDownLatch**等。
+
+### 6.1 WaitGroup的基本用法
 
 ```go
 func (wg *WaitGroup) Add(delta int)		// 用来设置WaitGroup的计数值
@@ -679,13 +799,88 @@ func (wg *WaitGroup) Wait()   // 调用这个方法的goroutine会一直阻塞�
 
 
 
-### WaitGroup的实现
+```go
+// 线程安全的计数器
+type Counter struct {
+    mu    sync.Mutex
+    count uint64
+}
+// 对计数值加一
+func (c *Counter) Incr() {
+    c.mu.Lock()
+    c.count++
+    c.mu.Unlock()
+}
+// 获取当前的计数值
+func (c *Counter) Count() uint64 {
+    c.mu.Lock()
+    defer c.mu.Unlock()
+    return c.count
+}
+// sleep 1秒，然后计数值加1
+func worker(c *Counter, wg *sync.WaitGroup) {
+    defer wg.Done()
+    time.Sleep(time.Second)
+    c.Incr()
+}
+
+func main() {
+    var counter Counter
+    
+    var wg sync.WaitGroup
+    wg.Add(10) // WaitGroup的值设置为10
+
+    for i := 0; i < 10; i++ { // 启动10个goroutine执行加1任务
+        go worker(&counter, &wg)
+    }
+    // 检查点，等待goroutine都完成任务
+    wg.Wait()
+    // 输出当前计数器的值
+    fmt.Println(counter.Count())
+}
+```
 
 
 
+### 6.2 WaitGroup的实现
 
 
-### 使用WaitGroup时的常见错误
+
+```go
+type WaitGroup struct {
+    // 避免复制使用的一个技巧，可以告诉vet工具违反了复制使用的规则
+    noCopy noCopy
+    // 64bit(8bytes)的值分成两段，高32bit是计数值，低32bit是waiter的计数
+    // 另外32bit是用作信号量的
+    // 因为64bit值的原子操作需要64bit对齐，但是32bit编译器不支持，所以数组中的元素在不同的架构中不一样，具体处理看下面的方法
+    // 总之，会找到对齐的那64bit作为state，其余的32bit做信号量
+    state1 [3]uint32
+}
+
+
+// 得到state的地址和信号量的地址
+func (wg *WaitGroup) state() (statep *uint64, semap *uint32) {
+    if uintptr(unsafe.Pointer(&wg.state1))%8 == 0 {
+        // 如果地址是64bit对齐的，数组前两个元素做state，后一个元素做信号量
+        return (*uint64)(unsafe.Pointer(&wg.state1)), &wg.state1[2]
+    } else {
+        // 如果地址是32bit对齐的，数组后两个元素用来做state，它可以用来做64bit的原子操作，第一个元素32bit用来做信号量
+        return (*uint64)(unsafe.Pointer(&wg.state1[1])), &wg.state1[0]
+    }
+}
+```
+
+在64位环境下，state1的第一个元素是waiter数，第二个元素是WaitGroup的计数值，第三个元素是信号量。
+
+![](images/image-20250322203326986.png)
+
+在32位环境下，如果state1不是64位对齐的地址，那么state1的第一个元素是信号量，后两个元素分别是waiter数和计数值。
+
+![](images/image-20250322203404644.png)
+
+
+
+### 6.3 使用WaitGroup时的常见错误
 
 #### 常见问题一：计数器设置为负值
 
@@ -699,13 +894,15 @@ func (wg *WaitGroup) Wait()   // 调用这个方法的goroutine会一直阻塞�
 
 
 
-### noCopy：辅助vet检查
+
+
+### 6.4 noCopy：辅助vet检查
 
 
 
 
 
-### 流行的Go开发项目中的坑
+### 6.5 流行的Go开发项目中的坑
 
 
 
@@ -717,9 +914,82 @@ func (wg *WaitGroup) Wait()   // 调用这个方法的goroutine会一直阻塞�
 
 ## 7 Cond：条件变量的实现机制及避坑指南
 
-
+> Java 等待/通知（wait/notify）机制
+>
+> 请实现一个限定容量的队列（queue），当队列满或者空的时候，利用等待/通知机制实现阻塞或者唤醒。
 
 ### Cond的基本用法
+
+```go
+type Cond
+func NeWCond(l Locker) *Cond
+func (c *Cond) Broadcast()
+func (c *Cond) Signal()
+func (c *Cond) Wait()
+```
+
+- Signal方法，允许调用者Caller唤醒一个等待此Cond的goroutine。如果此时没有等待的goroutine，显然无需通知waiter；如果Cond等待队列中有一个或者多个等待的goroutine，则需要从等待队列中移除第一个goroutine并把它唤醒。在其他编程语言中，比如Java语言中，Signal方法也被叫做notify方法。调用Signal方法时，不强求你一定要持有c.L的锁。
+- Broadcast方法，允许调用者Caller唤醒所有等待此Cond的goroutine。如果此时没有等待的goroutine，显然无需通知waiter；如果Cond等待队列中有一个或者多个等待的goroutine，则清空所有等待的goroutine，并全部唤醒。在其他编程语言中，比如Java语言中，Broadcast方法也被叫做notifyAll方法。同样地，调用Broadcast方法时，也不强求你一定持有c.L的锁。
+- Wait方法，会把调用者Caller放入Cond的等待队列中并阻塞，直到被Signal或者Broadcast的方法从等待队列中移除并唤醒
+
+
+
+> Go实现的sync.Cond的方法名是Wait、Signal和Broadcast，这是计算机科学中条件变量的通用方法名。比如，C语言中对应的方法名是pthread_cond_wait、pthread_cond_signal和 pthread_cond_broadcast。
+
+
+
+### Cond的实现原理
+
+```go
+type Cond struct {
+    noCopy noCopy
+
+    // 当观察或者修改等待条件的时候需要加锁
+    L Locker
+
+    // 等待队列
+    notify  notifyList
+    checker copyChecker
+}
+
+func NewCond(l Locker) *Cond {
+    return &Cond{L: l}
+}
+
+func (c *Cond) Wait() {
+    c.checker.check()
+    // 增加到等待队列中
+    t := runtime_notifyListAdd(&c.notify)
+    c.L.Unlock()
+    // 阻塞休眠直到被唤醒
+    runtime_notifyListWait(&c.notify, t)
+    c.L.Lock()
+}
+
+func (c *Cond) Signal() {
+    c.checker.check()
+    runtime_notifyListNotifyOne(&c.notify)
+}
+
+func (c *Cond) Broadcast() {
+    c.checker.check()
+    runtime_notifyListNotifyAll(&c.notify）
+}
+```
+
+
+
+### 使用Cond的2个常见错误
+
+- 调用Wait的时候没有加锁。
+
+
+
+- 只调用了一次Wait，没有检查等待条件是否满足，结果条件没满足，程序就继续执行了。
+
+
+
+### 知名项目中Cond的使用
 
 
 
@@ -729,7 +999,31 @@ func (wg *WaitGroup) Wait()   // 调用这个方法的goroutine会一直阻塞�
 
 ## 8 Once：一个简约而不简单的并发原语
 
+Once可以用来执行且仅仅执行一次动作，常常用于单例对象的初始化场景。
 
+### Once的使用场景
+
+
+
+
+
+### 如何实现一个Once？
+
+
+
+
+
+### 使用Once可能出现的2种错误
+
+#### 1️⃣死锁
+
+
+
+#### 2️⃣未初始化
+
+
+
+### Once的踩坑案例
 
 ![](images/image-20250221004227693.png)
 
