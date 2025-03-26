@@ -3887,6 +3887,8 @@ func main() {
 
 ### 19.2 for range
 
+Go为数组、切片、字符串、map、channel的for循环提供了语法糖：for range。
+
 #### 切片
 
 ```go
@@ -3952,6 +3954,16 @@ for v := range c {
 在这个例子中，for range每次从channel中读取一个元素后，会把它赋值给循环变量v，并进入循环体。当channel中没有数据可读的时候，for range循环会阻塞在对channel的读操作上。直到channel关闭时，for range循环才会结束，这也是for range循环与channel配合时隐含的循环判断条件。
 
 
+
+#### 小结
+
+| 数据类型        |      返回值      |  顺序性  | 底层传递方式 |
+| :-------------- | :--------------: | :------: | :----------: |
+| 数组            |     索引、值     | 固定顺序 |    值传递    |
+| 切片            |     索引、值     | 固定顺序 |   引用传递   |
+| 字符串          | 字节索引、`rune` |  按字符  |    不可变    |
+| 映射（Map）     |      键、值      |   随机   |    哈希表    |
+| 通道（Channel） |        值        | 先进先出 |     指针     |
 
 ### 19.3 带label的continue语句
 
@@ -4866,33 +4878,290 @@ func (w *reflectWithString) resolve() error {
 
 去掉这行代码并不会对`resolve`方法的逻辑造成任何影响，但真正出现问题时，开发人员就缺少了“断言”潜在bug提醒的辅助支持了。
 
-在Go标准库中，**大多数panic的使用都是充当类似断言的作用的**。
+在Go标准库中，**大多数panic的使用都是充当类似==断言==的作用的**。
 
-#### 第三点：不要混淆异常与错误 🔖
+#### 第三点：不要混淆异常与错误 
+
+Java的“checked exception”处理的本质是**错误处理**，对应go中基于error值比较模型的错误处理。
+
+而Go中的panic呢，更接近于Java的`RuntimeException`+`Error`。
 
 
 
-### 23.4 使用defer简化函数实现 🔖
+### 23.4 使用defer简化函数实现
 
-Go语言引入defer的初衷，就是解决这些问题。那么，defer具体是怎么解决这些问题的呢？或者说，defer具体的运作机制是怎样的呢？
+```go
+func doSomething() error {
+    var mu sync.Mutex
+    mu.Lock()
+
+    r1, err := OpenResource1()
+    if err != nil {
+        mu.Unlock()
+        return err
+    }
+
+    r2, err := OpenResource2()
+    if err != nil {
+        r1.Close()
+        mu.Unlock()
+        return err
+    }
+
+    r3, err := OpenResource3()
+    if err != nil {
+        r2.Close()
+        r1.Close()
+        mu.Unlock()
+        return err
+    }
+
+    // 使用r1，r2, r3
+    err = doWithResources() 
+    if err != nil {
+        r3.Close()
+        r2.Close()
+        r1.Close()
+        mu.Unlock()
+        return err
+    }
+
+    r3.Close()
+    r2.Close()
+    r1.Close()
+    mu.Unlock()
+    return nil
+}
+```
+
+类代码的特点就是在函数中会申请一些资源，并在函数退出前释放或关闭这些资源，比如这里的互斥锁mu以及资源r1~r3就是这样。
+
+函数的实现需要确保，无论函数的执行流是按预期顺利进行，还是出现错误，这些资源在函数退出时都要被及时、正确地释放。为此，我们需要尤为关注函数中的错误处理，在错误处理时不能遗漏对资源的释放。
+
+但这样的要求，就导致我们在进行资源释放，尤其是有多个资源需要释放的时候，比如上面示例那样，会大大增加开发人员的心智负担。同时当待释放的资源个数较多时，整个代码逻辑就会变得十分复杂，程序可读性、健壮性也会随之下降。但即便如此，如果函数实现中的某段代码逻辑抛出panic，传统的错误处理机制依然没有办法捕获它并尝试从panic恢复。
+
+Go语言引入defer的初衷，就是解决这些问题。defer具体的运作机制是怎样的呢？
+
+defer是Go语言提供的一种延迟调用机制，defer的运作离不开函数。
+
+- 在Go中，只有在函数（和方法）内部才能使用defer；
+- defer关键字后面只能接函数（或方法），这些函数被称为**deferred函数**。defer将它们注册到其所在Goroutine中，用于存放deferred函数的栈数据结构中，这些deferred函数将在执行defer的函数退出前，按后进先出（LIFO）的顺序被程序调度执行。
 
 ![](images/image-20240710100648693.png)
 
-### 23.5 defer使用的几个注意事项 🔖
+而且，无论是执行到函数体尾部返回，还是在某个错误处理分支显式return，又或是出现panic，已经存储到deferred函数栈中的函数，都会被调度执行。所以说，<u>deferred函数是一个可以在任何情况下为函数进行**收尾工作**的好“伙伴”</u>。
+
+修改为：
+
+```go
+func doSomething() error {
+    var mu sync.Mutex
+    mu.Lock()
+    defer mu.Unlock()
+
+    r1, err := OpenResource1()
+    if err != nil {
+        return err
+    }
+    defer r1.Close()
+
+    r2, err := OpenResource2()
+    if err != nil {
+        return err
+    }
+    defer r2.Close()
+
+    r3, err := OpenResource3()
+    if err != nil {
+        return err
+    }
+    defer r3.Close()
+
+    // 使用r1，r2, r3
+    return doWithResources() 
+}
+```
+
+资源释放函数的defer注册动作，紧邻着资源申请成功的动作，这样成对出现的惯例就极大降低了遗漏资源释放的可能性。
+
+同时，代码的简化也意味代码可读性的提高，以及代码健壮度的增强。
+
+### 23.5 defer使用的几个注意事项
 
 defer不仅可以用来**捕捉和恢复panic**，还能让函数变得**更简洁和健壮**。
 
 #### 第一点：明确哪些函数可以作为deferred函数
 
+可以是自定义的函数或方法，但对于有返回值的自定义函数或方法，返回值会在deferred函数被调度执行的时候被自动丢弃。
+
+> Go语言内置函数的完全列表：
+>
+> ```plain
+> Functions:
+> 	append cap close complex copy delete imag len
+> 	make new panic print println real recover
+> ```
+
+，**内置函数能否作为 `deferred` 函数取决于其返回值类型和语法特性**。
+
+- **可直接使用**的内置函数：`close`、`copy`、`delete`、`print`、`panic`、`recover` 等无返回值的函数。
+
+- 不能直接使用的，**需包裹匿名函数**的内置函数：`append`、`len`、`cap`、`make`、`new` 等有返回值的函数。
+
+  ```go
+  // 示例：间接调用 append
+  defer func() { _ = append(slice, 1) }()  // 合法，但返回值无实际意义[4,9](@ref)
+  
+  // 示例：间接调用 len
+  defer func() { fmt.Println(len(slice)) }()  // 合法
+  ```
+
 
 
 #### 第二点：注意defer关键字后面表达式的求值时机
+
+牢记：**defer关键字后面的表达式，是在将deferred函数注册到deferred函数栈的时候进行求值的**。
 
 
 
 #### 第三点：知晓defer带来的性能损耗
 
+Go核心团队对defer性能进行了多次优化，到Go 1.17版本之后，defer的开销已经足够小了。
 
+
+
+### 思考题
+
+> 除了捕捉panic、延迟释放资源外，日常编码中还有哪些使用defer的小技巧呢？
+
+#### 1. **性能分析与调试**
+利用 `defer` 记录函数执行时间，辅助优化代码性能。  **示例**：  
+```go
+func ExpensiveTask() {
+    start := time.Now()
+    defer func() {
+        log.Printf("耗时: %v", time.Since(start))
+    }()
+    // 执行耗时操作...
+}
+```
+• **原理**：`defer` 在函数退出时记录时间差，适用于定位性能瓶颈。
+• **适用场景**：算法耗时分析、接口响应时间监控。
+
+#### 2. **锁的延迟释放**
+在并发场景中，确保锁的释放与加锁逻辑对应，避免死锁。  **标准库示例**（`sync.Mutex`）：  
+```go
+var mu sync.Mutex
+func SafeWrite(data map[string]int, key string) {
+    mu.Lock()
+    defer mu.Unlock() // 确保解锁执行
+    data[key] = 1
+}
+```
+• **优势**：即使函数中途 `return` 或发生 `panic`，锁仍会被释放。
+• **扩展**：读写锁（`sync.RWMutex`）的 `RLock()`/`RUnlock()` 同样适用。
+
+#### 3. **修改函数返回值**
+通过 `defer` 修改命名返回值，实现后置逻辑调整。  **示例**：  
+```go
+func ProcessData(input string) (result string, err error) {
+    defer func() {
+        if err == nil {
+            result = "处理结果：" + result // 修改返回值
+        }
+    }()
+    // 正常处理逻辑...
+    return rawResult, nil
+}
+```
+• **关键点**：仅适用于命名返回值（Named Return Values）。
+• **陷阱**：若返回值被 `defer` 修改，需注意调用方是否依赖原始值。
+
+#### 4. **上下文清理与状态重置**
+管理全局状态或临时环境，例如重置日志输出格式。  **示例**：  
+```go
+func LogWithFormat(format string) {
+    original := log.Flags()
+    defer log.SetFlags(original) // 恢复原始日志格式
+    log.SetFlags(log.Ldate | log.Lmicroseconds)
+    // 使用临时格式记录日志...
+}
+```
+• **应用场景**：临时修改环境变量、数据库连接参数等。
+
+#### 5. **协程同步控制**
+结合 `sync.WaitGroup` 确保协程任务完成。  **示例**：  
+```go
+func ProcessBatch(jobs []Job) {
+    var wg sync.WaitGroup
+    for _, job := range jobs {
+        wg.Add(1)
+        go func(j Job) {
+            defer wg.Done() // 确保协程结束前调用 Done()
+            // 处理任务...
+        }(job)
+    }
+    wg.Wait()
+}
+```
+• **作用**：防止因 `panic` 或提前 `return` 导致 `WaitGroup` 计数器未归零。
+
+#### 6. **事务回滚与提交**
+在数据库操作中，通过 `defer` 统一处理事务状态。  **伪代码示例**：  
+```go
+func UpdateOrder(db *sql.DB) (err error) {
+    tx, err := db.Begin()
+    if err != nil {
+        return err
+    }
+    defer func() {
+        if err != nil { // 根据错误决定回滚或提交
+            tx.Rollback()
+        } else {
+            tx.Commit()
+        }
+    }()
+    // 执行多个 SQL 操作...
+    return nil
+}
+```
+• **设计意义**：集中事务状态判断，避免遗漏 `Rollback()`。
+
+#### 7. **HTTP 响应处理**
+在 HTTP 服务中统一关闭响应体或处理错误。  **标准库示例**（`net/http`）：  
+```go
+resp, err := http.Get("https://example.com")
+if err != nil {
+    return err
+}
+defer resp.Body.Close() // 确保响应体关闭
+body, err := io.ReadAll(resp.Body)
+```
+• **扩展技巧**：结合 `defer` 和 `recover()` 统一捕获 HTTP 处理函数的 `panic`。
+
+#### 注意事项与陷阱
+1. **循环中的 `defer`**  
+   避免在循环内直接使用 `defer`（如文件关闭），可能导致资源释放延迟。应包裹为函数：  
+   
+   ```go
+   for _, file := range files {
+       func(f *os.File) {
+           defer f.Close()
+           // 处理文件...
+       }(file)
+   }
+   ```
+   
+2. **参数立即求值**  
+   `defer` 的参数在注册时求值，而非执行时。例如：  
+   ```go
+   x := 1
+   defer fmt.Println(x) // 输出 1
+   x = 2
+   ```
+
+3. **性能优化**  
+   Go 1.14+ 的开放编码优化（Open-coded Defer）可减少 `defer` 的开销，但需满足条件（如函数内 `defer` 数量不超过 8 个）。
 
 
 
