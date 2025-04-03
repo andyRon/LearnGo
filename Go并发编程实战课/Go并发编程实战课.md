@@ -1223,23 +1223,65 @@ Or-Done模式、扇入模式、扇出模式、Stream和map-reduce
 
 ### P/V操作
 
+Dijkstra在他的论文中为信号量定义了两个操作P和V。P操作（descrease、wait、acquire）是减少信号量的计数值，而V操作（increase、signal、release）是增加信号量的计数值。
+
+
+
+- 初始化信号量：设定初始的资源的数量。
+- P操作：将信号量的计数值减去1，如果新值已经为负，那么调用者会被阻塞并加入到等待队列中。否则，调用者会继续执行，并且获得一个资源。
+- V操作：将信号量的计数值加1，如果先前的计数值为负，就说明有等待的P操作的调用者。它会从等待队列中取出一个等待的调用者，唤醒它，让它继续执行。
+
+
+
 
 
 ### Go官方扩展库的实现
 
+并不叫Semaphore，而是叫Weighted。
 
+```go
+func NewWeighted(n int64) *Weighted {
+func (s *Weighted) Acquire(ctx context.Context, n int64) error {
+func (s *Weighted) TryAcquire(n int64) bool {
+func (s *Weighted) Release(n int64) {
+```
+
+1.  Acquire方法：相当于P操作，你可以一次获取多个资源，如果没有足够多的资源，调用者就会被阻塞。它的第一个参数是Context，这就意味着，你可以通过Context增加超时或者cancel的机制。如果是正常获取了资源，就返回nil；否则，就返回ctx.Err()，信号量不改变。
+2.  Release方法：相当于V操作，可以将n个资源释放，返还给信号量。
+3.  TryAcquire方法：尝试获取n个资源，但是它不会阻塞，要么成功获取n个资源，返回true，要么一个也不获取，返回false。
+
+
+
+
+
+如果在实际应用中，你想等所有的Worker都执行完，就可以获取最大计数值的信号量。
 
 ### 使用信号量的常见错误
+
+- 请求了资源，但是忘记释放它；
+- 释放了从未请求的资源；
+- 长时间持有一个资源，即使不需要它；
+- 不持有一个资源，却直接使用它
 
 
 
 ### 其它信号量的实现
+
+使用Channel来实现
 
 
 
 
 
 ![](images/image-20250221150814734.png)
+
+### 思考题
+
+1.  你能用Channel实现信号量并发原语吗？你能想到几种实现方式？
+
+
+
+2. 为什么信号量的资源数设计成int64而不是uint64呢？
 
 
 
@@ -1251,15 +1293,47 @@ SingleFlight的作用是将并发请求合并成一个请求，以减少对下�
 
 而CyclicBarrier是一个可重用的栅栏并发原语，用来控制一组请求同时执行的数据结构。
 
-### 请求合并SingleFlight
+它们两个并没有直接的关系。
+
+### 17.1 请求合并SingleFlight
+
+SingleFlight的作用是，在处理多个goroutine同时调用同一个函数的时候，只让一个goroutine去调用这个函数，等到这个goroutine返回结果的时候，再把结果返回给这几个同时调用的goroutine，这样可以减少并发调用的数量。
+
+> 标准库中的sync.Once也可以保证并发的goroutine只会执行一次函数f，那么，SingleFlight和sync.Once有什么区别呢？
+
+其实，sync.Once不是只在并发的时候保证只有一个goroutine执行函数f，而是会保证永远只执行一次，而SingleFlight是每次调用都重新执行，并且在多个请求同时调用的时候只有一个执行。它们两个面对的场景是不同的，sync.Once主要是用在单次初始化场景中，而SingleFlight主要用在合并并发请求的场景中，尤其是缓存场景。
+
+#### 实现原理
 
 
 
-### 循环栅栏CyclicBarrier
+#### 应用场景
+
+
+
+### 17.2 循环栅栏CyclicBarrier
+
+循环栅栏（CyclicBarrier），它常常应用于重复进行一组goroutine同时执行的场景中。
+
+CyclicBarrier允许一组goroutine彼此等待，到达一个共同的执行点。同时，因为它可以被重复使用，所以叫循环栅栏。具体的机制是，大家都在栅栏前等待，等全部都到齐了，就抬起栅栏放行
+
+> CyclicBarrier参考Java CyclicBarrier和C# Barrier的功能实现。
 
 
 
 ![](images/image-20250221150929766.png)
+
+
+
+
+
+#### 实现原理
+
+
+
+
+
+
 
 
 
@@ -1269,9 +1343,57 @@ SingleFlight的作用是将并发请求合并成一个请求，以减少对下�
 
 ## 18 分组操作：处理一组子任务，该用什么并发原语？
 
+共享资源保护、任务编排和消息传递是Go并发编程中常见的场景，而**分组执行一批相同的或类似的任务则是任务编排中一类情形**。
+
 分组编排的一些常用场景和并发原语，包括ErrGroup、gollback、Hunch和schedgroup。
 
-### ErrGroup
+### 18.1 ErrGroup
+
+#### 基本用法
+
+
+
+#### ErrGroup使用例子
+
+
+
+### 其它实用的Group并发原语
+
+#### SizedGroup/ErrSizedGrou
+
+go-pkgz/syncs提供了SizedGroup和ErrSizedGroup两个Group并发原语。
+
+SizedGroup内部是使用信号量和WaitGroup实现的，它通过信号量控制并发的goroutine数量，或者是不控制goroutine数量，只控制子任务并发执行时候的数量（通过）。
+
+默认情况下，SizedGroup控制的是子任务的并发数量，而不是goroutine的数量。
+
+
+
+
+
+ErrSizedGroup为SizedGroup提供了error处理的功能，它的功能和Go官方扩展库的功能一样，就是等待子任务完成并返回第一个出现的error。
+
+
+
+SizedGroup可以把Context传递给子任务，这样可以通过cancel让子任务中断执行，但是ErrSizedGroup却没有实现。我认为，这是一个值得加强的地方。
+
+
+
+#### gollback
+
+gollback也是用来处理一组子任务的执行的，不过它解决了ErrGroup收集子任务返回结果的痛点。
+
+
+
+
+
+#### Hunch
+
+
+
+
+
+#### schedgroup
 
 
 
@@ -1295,23 +1417,43 @@ SingleFlight的作用是将并发请求合并成一个请求，以减少对下�
 
 常用来做协调工作的软件系统是Zookeeper、etcd、Consul之类的软件，Zookeeper为Java生态群提供了丰富的分布式并发原语（通过Curator库），但是缺少Go相关的并发原语库。Consul在提供分布式并发原语这件事儿上不是很积极，而etcd就提供了非常好的分布式并发原语，比如分布式互斥锁、分布式读写锁、Leader选举，等等。
 
-### Leader选举
+### 19.1 Leader选举
 
+Leader选举常常用在==主从架构==的系统中。主从架构中的服务节点分为主（Leader、Master）和从（Follower、Slave）两种角色，实际节点包括1主n从，一共是n+1个节点。
 
+主节点常常执行写操作，从节点常常执行读操作，如果读写都在主节点，从节点只是提供一个备份功能的话，那么，主从架构就会退化成==主备模式架构==。
+
+> 主从架构中最重要的是如何确定节点的角色，也就是，到底哪个节点是主，哪个节点是从？
+
+**在同一时刻，系统中不能有两个主节点，否则，如果两个节点都是主，都执行写操作的话，就有可能出现数据不一致的情况，所以，我们需要一个选主机制，选择一个节点作为主节点，这个过程就是Leader选举**。
+
+当主节点宕机或者是不可用时，就需要新一轮的选举，从其它的从节点中选择出一个节点，让它作为新主节点，宕机的原主节点恢复后，可以变为从节点，或者被摘掉。
+
+可以通过etcd基础服务来实现leader选举。具体点说，我们可以将Leader选举的逻辑交给etcd基础服务，这样，我们只需要把重心放在业务开发上。etcd基础服务可以通过多节点的方式保证7*24服务，所以，我们也不用担心Leader选举不可用的问题。如下图所示：
 
 ![](images/image-20250221151326400.png)
 
 
 
-
-
-### 互斥锁
-
+#### 选举
 
 
 
+#### 查询
 
-### 读写锁
+
+
+#### 监控
+
+
+
+### 19.2 互斥锁
+
+
+
+
+
+### 19.3 读写锁
 
 
 
@@ -1321,23 +1463,23 @@ SingleFlight的作用是将并发请求合并成一个请求，以减少对下�
 
 ## 20 在分布式环境中，队列、栅栏和STM该如何实现？
 
-### 分布式队列和优先级队列
+### 20.1 分布式队列和优先级队列
 
 
 
-### 分布式栅栏
+### 20.2 分布式栅栏
 
 
 
-### Barrier：分布式栅栏
+#### Barrier：分布式栅栏
 
 
 
-### DoubleBarrier：计数型栅栏
+#### DoubleBarrier：计数型栅栏
 
 
 
-### STM
+### 20.3 STM
 
 
 
