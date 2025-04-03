@@ -8056,32 +8056,179 @@ $ sysctl -a | grep kern.ipc.somaxconn
 kern.ipc.somaxconn: 128
 ```
 
-
+🔖
 
 - 第三种情况：若网络延迟较大，Dial将阻塞并超时。
 
+如果网络延迟较大，TCP连接的建立过程（三次握手）将更加艰难坎坷，会经历各种丢包，时间消耗自然也会更长，这种情况下，`Dial`函数会阻塞。如果经过长时间阻塞后依旧无法建立连接，那么`Dial`也会返回类似`getsockopt: operation timed out`的错误。
 
+在连接建立阶段，多数情况下`Dial`是可以满足需求的，即便是阻塞一小会儿也没事。但对于那些需要有严格的连接时间限定的Go应用，如果一定时间内没能成功建立连接，程序可能会需要执行一段“错误”处理逻辑，所以，这种情况下，我们使用`DialTimeout`函数更适合。
 
 ### 36.7 全双工通信
 
+一旦客户端调用Dial成功，就在客户端与服务端之间建立起了一条全双工的通信通道。通信双方通过各自获得的Socket，可以在向对方发送数据包的同时，接收来自对方的数据包。下图展示了系统层面对这条全双工通信通道的实现原理：
+
 ![](images/image-20240729154153246.png)
 
+任何一方的操作系统，都会为已建立的连接分配一个**发送缓冲区**和一个**接收缓冲区**。
 
+以客户端为例，客户端会通过成功连接服务端后得到的conn（封装了底层的socket）向服务端发送数据包。这些数据包会先进入到己方的发送缓冲区中，之后，这些数据会被操作系统内核通过网络设备和链路，发到服务端的接收缓冲区中，服务端程序再通过代表客户端连接的conn读取服务端接收缓冲区中的数据，并处理。
+
+反之，服务端发向客户端的数据包也是先后经过服务端的发送缓冲区、客户端的接收缓冲区，最终到达客户端的应用的。
 
 ### 36.8 Socket读操作
 
+连接建立起来后，就要在连接上进行读写以完成业务逻辑。
+
+Go运行时隐藏了**I/O多路复用**的复杂性。Go语言使用者只需采用**Goroutine+阻塞I/O模型**，就可以满足大部分场景需求。Dial连接成功后，会返回一个net.Conn接口类型的变量值，这个接口变量的底层类型为一个`*TCPConn`：
+
+```go
+//$GOROOT/src/net/tcpsock.go
+type TCPConn struct {
+    conn
+}
+```
+
+TCPConn内嵌了一个非导出类型：`conn`（封装了底层的socket），因此，TCPConn“继承”了`conn`类型的`Read`和`Write`方法，后续通过`Dial`函数返回值调用的`Read`和`Write`方法都是net.conn的方法，它们分别代表了对socket的读和写。
+
+通过几个场景来总结Go中从socket读取数据的行为特点：
+
 - 首先是Socket中无数据的场景。
+
+  连接建立后，如果客户端未发送数据，服务端会阻塞在Socket的读操作上，这和前面提到的“阻塞I/O模型”的行为模式是一致的。执行该这个操作的Goroutine也会被挂起。Go运行时会监视这个Socket，直到它有数据读事件，才会重新调度这个Socket对应的Goroutine完成读操作。
+
 - 第二种情况是Socket中有部分数据。
+
+  如果Socket中有部分数据就绪，且数据数量小于一次读操作期望读出的数据长度，那么读操作将会成功读出这部分数据，并返回，而不是等待期望长度数据全部读取后，再返回。
+
+  举个例子，服务端创建一个长度为10的切片作为接收数据的缓冲区，等待Read操作将读取的数据放入切片。当客户端在已经建立成功的连接上，成功写入两个字节的数据（比如：hi）后，服务端的Read方法将成功读取数据，并返回`n=2，err=nil`，而不是等收满10个字节后才返回。
+
 - 第三种情况是Socket中有足够数据。
+
+  如果连接上有数据，且数据长度大于等于一次`Read`操作期望读出的数据长度，那么`Read`将会成功读出这部分数据，并返回。这个情景是最符合我们对`Read`的期待的了。
+
+  以上面的例子为例，当客户端在已经建立成功的连接上，成功写入15个字节的数据后，服务端进行第一次`Read`时，会用连接上的数据将我们传入的切片缓冲区（长度为10）填满后返回：`n = 10, err = nil`。这个时候，内核缓冲区中还剩5个字节数据，当服务端再次调用`Read`方法时，就会把剩余数据全部读出。
+
 - 最后一种情况是设置读操作超时。
+
+有些场合，对socket的读操作的阻塞时间有严格限制的，但由于Go使用的是阻塞I/O模型，如果没有可读数据，Read操作会一直阻塞在对Socket的读操作上。
+
+这时，可以通过net.Conn提供的SetReadDeadline方法，设置读操作的超时时间，当超时后仍然没有数据可读的情况下，Read操作会解除阻塞并返回超时错误，这就给Read方法的调用者提供了进行其他业务处理逻辑的机会。
+
+SetReadDeadline方法接受一个绝对时间作为超时的deadline。一旦通过这个方法设置了某个socket的Read deadline，当发生超时后，如果我们不重新设置Deadline，那么后面与这个socket有关的所有读操作，都会返回超时失败错误。
+
+结合SetReadDeadline设置的服务端一般处理逻辑：
+
+```go
+func handleConn(c net.Conn) {
+    defer c.Close()
+    for {
+        // read from the connection
+        var buf = make([]byte, 128)
+        c.SetReadDeadline(time.Now().Add(time.Second))
+        n, err := c.Read(buf)
+        if err != nil {
+            log.Printf("conn read %d bytes,  error: %s", n, err)
+            if nerr, ok := err.(net.Error); ok && nerr.Timeout() {
+                // 进行其他业务逻辑的处理
+                continue
+            }
+            return
+        }
+        log.Printf("read %d bytes, content is %s\n", n, string(buf[:n]))
+    }
+}
+```
+
+使用SetReadDeadline（time.Time{}）实现取消超时设置。
 
 
 
 ### 36.9 Socket写操作
 
-- 第一种情况：写阻塞。
-- 第二种情况：写入部分数据。
-- 第三种情况：写入超时。
+通过net.Conn实例的Write方法，可以将数据写入Socket。当Write调用的返回值n的值，与预期要写入的数据长度相等，且err = nil时，就执行了一次成功的Socket写操作，这是在调用Write时遇到的最常见的情形。
+
+和Socket的读操作一些特殊情形相比，Socket写操作遇到的特殊情形同样不少：
+
+#### 第一种情况：写阻塞
+
+TCP协议通信两方的操作系统内核，都会为这个连接保留数据缓冲区，调用Write向Socket写入数据，实际上是将数据写入到操作系统协议栈的数据缓冲区中。TCP是全双工通信，因此每个方向都有独立的数据缓冲。当发送方将对方的接收缓冲区，以及自身的发送缓冲区都写满后，再调用Write方法就会出现阻塞的情况。
+
+例子，客户端：
+
+```go
+func main() {
+    log.Println("begin dial...")
+    conn, err := net.Dial("tcp", ":8888")
+    if err != nil {
+        log.Println("dial error:", err)
+        return
+    }
+    defer conn.Close()
+    log.Println("dial ok")
+
+    data := make([]byte, 65536)
+    var total int
+    for {
+        n, err := conn.Write(data)
+        if err != nil {
+            total += n
+            log.Printf("write %d bytes, error:%s\n", n, err)
+            break
+        }
+        total += n
+        log.Printf("write %d bytes this time, %d bytes in total\n", n, total)
+    }
+
+    log.Printf("write %d bytes in total\n", total)
+}
+```
+
+客户端每次调用Write方法向服务端写入65536个字节，并在Write方法返回后，输出此次Write的写入字节数和程序启动后写入的总字节数量。
+
+服务端的处理程序逻辑摘录：
+
+```go
+... ...
+func handleConn(c net.Conn) {
+    defer c.Close()
+    time.Sleep(time.Second * 10)
+    for {
+        // read from the connection
+        time.Sleep(5 * time.Second)
+        var buf = make([]byte, 60000)
+        log.Println("start to read from conn")
+        n, err := c.Read(buf)
+        if err != nil {
+            log.Printf("conn read %d bytes,  error: %s", n, err)
+            if nerr, ok := err.(net.Error); ok && nerr.Timeout() {
+                continue
+            }
+        }
+
+        log.Printf("read %d bytes, content is %s\n", n, string(buf[:n]))
+    }
+}
+... ...
+```
+
+务端在前10秒中并不读取数据，因此当客户端一直调用Write方法写入数据时，写到一定量后就会发生阻塞。
+
+🔖
+
+后续当服务端每隔5秒进行一次读操作后，内核socket缓冲区腾出了空间，客户端就又可以写入了:
+
+
+
+#### 第二种情况：写入部分数据
+
+
+
+
+
+#### 第三种情况：写入超时
+
+
 
 
 
@@ -8089,9 +8236,22 @@ kern.ipc.somaxconn: 128
 
 
 
+
+
+
+
 ### 36.11 Socket关闭
 
+通常情况下，当客户端需要断开与服务端的连接时，客户端会调用net.Conn的Close方法关闭与服务端通信的Socket。
 
+如果客户端主动关闭了Socket，那么服务端的`Read`调用将会读到什么呢？
+
+分“有数据关闭”和“无数据关闭”两种情况。
+
+- “==有数据关闭==”是指在客户端关闭连接（Socket）时，Socket中还有服务端尚未读取的数据。在这种情况下，服务端的Read会成功将剩余数据读取出来，最后一次Read操作将得到`io.EOF`错误码，表示客户端已经断开了连接。
+- 如果是在“==无数据关闭==”情形下，服务端调用的Read方法将直接返回`io.EOF`。
+
+不过因为Socket是全双工的，客户端关闭Socket后，如果服务端Socket尚未关闭，这个时候服务端向Socket的写入操作依然可能会成功，因为数据会成功写入己方的内核socket缓冲区中，即便最终发不到对方socket缓冲区也会这样。因此，当发现对方socket关闭后，己方应该正确合理处理自己的socket，再继续write已经没有任何意义了。
 
 
 
@@ -8099,17 +8259,52 @@ kern.ipc.somaxconn: 128
 
 ### 37.1 建立对协议的抽象
 
+程序是对现实世界的抽象。对于现实世界的自定义应用协议规范，我们需要在程序世界建立起对这份**协议的抽象**。
+
 #### 深入协议字段
 
+一个高度简化的、基于二进制模式定义的协议。
 
+二进制模式定义的特点，就是采用长度字段标识独立数据包的边界。
+
+在这个协议规范中：
+
+请求包和应答包的第一个字段（totalLength）都是包的总长度，它就是用来标识包边界的那个字段，也是在应用层用于“分割包”的最重要字段。
+
+请求包与应答包的第二个字段也一样，都是commandID，这个字段用于标识包类型
+
+- 连接请求包（值为0x01）
+- 消息请求包（值为0x02）
+- 连接响应包（值为0x81）
+- 消息响应包（值为0x82）
+
+```go
+const (
+    CommandConn   = iota + 0x01 // 0x01，连接请求包
+    CommandSubmit               // 0x02，消息请求包
+)
+
+const (
+    CommandConnAck   = iota + 0x81 // 0x81，连接请求的响应包
+    CommandSubmitAck               // 0x82，消息请求的响应包
+)
+```
+
+请求包与应答包的第三个字段都是ID，ID是每个连接上请求包的消息流水号，顺序累加，步长为1，循环使用，多用来请求发送方后匹配响应包，所以要求一对请求与响应消息的流水号必须相同。
+
+请求包与响应包唯一的不同之处，就在于最后一个字段：请求包定义了有效载荷（payload），这个字段承载了应用层需要的业务数据；而响应包则定义了请求包的响应状态字段（result），这里其实简化了响应状态字段的取值，成功的响应用0表示，如果是失败的响应，无论失败原因是什么，我们都用1来表示。
+
+明确了应用层协议的各个字段定义之后，我们接下来就看看如何建立起对这个协议的抽象。
 
 #### 建立Frame和Packet抽象
+
+TCP连接上的数据是一个没有边界的字节流，但在业务层眼中，没有字节流，只有各种协议消息。因此，无论是从客户端到服务端，还是从服务端到客户端，业务层在连接上看到的都应该是一个挨着一个的协议消息流。
 
 建立第一个抽象：**Frame**。每个Frame表示一个协议消息，这样在业务层眼中，连接上的字节流就是由一个接着一个Frame组成的，如下图所示：
 
 ![](images/image-20250121200532054.png)
 
-自定义协议就封装在这一个个的Frame中。协议规定了将Frame分割开来的方法，那就是利用每个Frame开始处的totalLength，每个Frame由一个totalLength和Frame的负载（payload）构成
+自定义协议就封装在这一个个的Frame中。协议规定了将Frame分割开来的方法，那就是利用每个Frame开始处的totalLength，每个Frame由一个totalLength和Frame的负载（payload）构成。
 
 ![](images/image-20250121200632964.png)
 
@@ -8135,9 +8330,43 @@ TCP流数据先后经过frame decode和packet decode，得到应用层所需的p
 
 #### Frame的实现
 
+协议部分最重要的两个抽象是Frame和Packet，建立frame包与packet包。
+
+frame包的职责是提供识别TCP流边界的编解码器，可以很容易为这样的编解码器，定义出一个统一的接口类型StreamFrameCodec：
+
+```go
+// tcp-server-demo1/frame/frame.go
+
+type FramePayload []byte
+
+type StreamFrameCodec interface {
+    Encode(io.Writer, FramePayload) error   // data -> frame，并写入io.Writer
+    Decode(io.Reader) (FramePayload, error) // 从io.Reader中提取frame payload，并返回给上层
+}
+```
+
+
+
 #### Packet的实现
 
+和Frame不同，Packet有多种类型（这里只定义了Conn、submit、connack、submit ack)。
 
+抽象这些类型需要遵循的共同接口：
+
+```go
+// tcp-server-demo1/packet/packet.go
+
+type Packet interface {
+    Decode([]byte) error     // []byte -> struct
+    Encode() ([]byte, error) //  struct -> []byte
+}
+```
+
+其中，Decode是将一段字节流数据解码为一个Packet类型，可能是conn，可能是submit等，具体要根据解码出来的commandID判断。
+
+而Encode则是将一个Packet类型编码为一段字节流数据。
+
+🔖
 
 ### 37.3 服务端的组装
 
@@ -8164,9 +8393,23 @@ Go程序的优化，也有着固定的套路可循:
 
 ### 38.2 建立性能基准
 
+建立性能基准的方式大概有两种，
+
+- 一种是通过**编写Go原生提供的性能基准测试（benchmark test）用例**来实现，这相当于对程序的局部热点建立性能基准，常用于一些算法或数据结构的实现，比如分布式全局唯一ID生成算法、树的插入/查找等。
+
+- 另外一种是**基于度量指标为程序建立起图形化的性能基准**，这种方式适合针对程序的整体建立性能基准。而我们的自定义协议服务端程序就十分适合用这种方式，接下来我们就来看一下基于度量指标建立基准的一种可行方案。
+
 #### 建立观测设施
 
+这些年，基于**Web的可视化工具、开源监控系统以及时序数据库**的兴起，给我们建立性能基准带来了很大的便利，业界有比较多成熟的工具组合可以直接使用。但业界最常用的还是**Prometheus+Grafana**的组合。
+
+以Docker为代表的轻量级容器（container）的兴起，让这些工具的部署、安装都变得十分简单。使用docker-compose工具，基于容器安装Prometheus+Grafana的组合。
+
+🔖
+
 #### 配置Grafana
+
+
 
 #### 在服务端埋入度量数据采集点
 
@@ -8176,17 +8419,23 @@ Go程序的优化，也有着固定的套路可循:
 - 每秒接收消息请求的数量（req_recv_rate）；
 - 每秒发送消息响应的数量（rsp_send_rate）。
 
+
+
 #### 第一版性能基准
 
 
 
 ### 38.3 尝试用pprof剖析
 
+Go内置了对Go代码进行性能剖析的工具：**pprof**。
+
 
 
 ### 38.4 代码优化
 
 #### 带缓存的网络I/O
+
+
 
 #### 重用内存对象
 
