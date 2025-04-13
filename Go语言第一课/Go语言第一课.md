@@ -6782,7 +6782,7 @@ Go的设计者将面向多核、**原生支持并发**作为了Go语言的设计
 
 ### 31.2 Go的并发方案：goroutine
 
-Go并没有使用操作系统线程作为承载分解后的代码片段（模块）的基本执行单元，而是实现了`goroutine`这一**由Go运行时（runtime）负责调度的、轻量的用户级线程**，为并发程序设计提供原生支持。【Goroutine 可以被称为**协程**或**Go 协程**。】
+Go并没有使用操作系统线程作为承载分解后的代码片段（模块）的基本执行单元，而是实现了`goroutine`这一**由Go运行时（runtime）负责调度的、轻量的用户级线程**，为并发程序设计提供原生支持。【Goroutine 可以被称为**协程**或**Go协程**。】
 
 相比传统操作系统线程来说，goroutine的优势主要是：
 
@@ -7634,7 +7634,7 @@ select是Go为了支持同时操作多个channel，而引入的另外一个并�
 
 
 
-## 34 并发：如何使用共享变量？ 🔖
+## 34 并发：如何使用共享变量？
 
 > Rob Pike：“不要通过共享内存来通信，应该通过通信来共享内存（Don’t communicate by sharing memory, share memory by communicating）”
 
@@ -7728,24 +7728,158 @@ PASS
 
 如果你的设计中没有转移结构体对象所有权，但又要保证结构体内部状态数据在多个Goroutine之间同步访问，那么你可以使用sync包提供的低级同步原语来实现，比如最常用的`sync.Mutex`。
 
-
+> 基准测试用于衡量代码性能（如执行时间、内存分配），帮助优化算法或实现方式。其核心是通过反复调用被测代码（次数由 `b.N` 动态决定），统计单位时间内的操作次数和资源消耗。
+>
+> 基准测试文件必须以 `_test.go` 结尾，并与被测试代码位于同一包中。
+>
+> 基准测试函数必须以 `Benchmark` 开头，参数为 `*testing.B`，无返回值。
+>
+> |       **场景**       |           **推荐参数**            |        **作用**        |
+> | :------------------: | :-------------------------------: | :--------------------: |
+> | 快速运行所有基准测试 |        `go test -bench .`         |      基础性能评估      |
+> |     详细内存分析     |   `go test -bench . -benchmem`    |      分析内存分配      |
+> |   长时间稳定性测试   | `go test -bench . -benchtime=30s` | 检测代码在高压下的表现 |
+> |     并发性能测试     |  结合 `RunParallel` 和 `-cpu=4`   |     多核利用率评估     |
 
 ### 34.2 sync包中同步原语使用的注意事项 
 
+```go
+// $GOROOT/src/sync/mutex.go
+// Values containing the types defined in this package should not be copied.
+```
+
+“不应复制那些包含了此包中类型的值”。
+
+sync包的其他源文件的一些注释：
+
+```go
+// $GOROOT/src/sync/mutex.go
+// A Mutex must not be copied after first use. （禁止复制首次使用后的Mutex）
+
+// $GOROOT/src/sync/rwmutex.go
+// A RWMutex must not be copied after first use.（禁止复制首次使用后的RWMutex）
+
+// $GOROOT/src/sync/cond.go
+// A Cond must not be copied after first use.（禁止复制首次使用后的Cond）
+... ...
+```
+
+> 为什么首次使用Mutex等sync包中定义的结构类型后，我们不应该再对它们进行复制操作呢？
+
+以Mutex为例：
+
+```go
+// $GOROOT/src/sync/mutex.go
+type Mutex struct {
+    state int32			// 表示当前互斥锁的状态
+    sema  uint32		// 用于控制锁状态的信号量
+}
+```
+
+初始情况下，Mutex的实例处于**Unlocked**状态（state和sema均为0）。对Mutex实例的复制也就是两个整型字段的复制。一旦发生复制，原变量与副本就是两个单独的内存块，各自发挥同步作用，互相就没有了关联。
+
+🔖
 
 
 
+在使用sync包中的类型的时候，推荐通过==闭包==方式，或者是==传递类型实例（或包裹该类型的类型实例）的地址（指针）==的方式进行。
 
 ### 34.3 互斥锁（Mutex）还是读写锁（RWMutex）？ 
+
+Mutex的应用方法：
+
+```go
+var mu sync.Mutex
+mu.Lock()   // 加锁
+doSomething()
+mu.Unlock() // 解锁
+```
+
+
 
 使用互斥锁的两个原则：
 
 - **尽量减少在锁中的操作**。这可以减少其他因Goroutine阻塞而带来的损耗与延迟。
 - **一定要记得调用Unlock解锁**。忘记解锁会导致程序局部死锁，甚至是整个程序死锁，会导致严重的后果。同时，我们也可以结合第23讲学习到的defer，优雅地执行解锁操作。
 
+读写锁与互斥锁用法大致相同，只不过多了一组加读锁和解读锁的方法：
 
+```go
+var rwmu sync.RWMutex
+rwmu.RLock()   //加读锁
+readSomething()
+rwmu.RUnlock() //解读锁
+rwmu.Lock()    //加写锁
+changeSomething()
+rwmu.Unlock()  //解写
+```
+
+写锁与Mutex的行为十分类似，一旦某Goroutine持有写锁，其他Goroutine无论是尝试加读锁，还是加写锁，都会被阻塞在写锁上。
+
+但读锁就宽松多了，一旦某个Goroutine持有读锁，它不会阻塞其他尝试加读锁的Goroutine，但加写锁的Goroutine依然会被阻塞住。
 
 通常，**互斥锁（Mutex）是临时区同步原语的首选**，它常被用来对结构体对象的内部状态、缓存等进行保护，是使用最为广泛的临界区同步原语。相比之下，读写锁的应用就没那么广泛了，只活跃于它擅长的场景下。
+
+读写锁（RWMutex）究竟擅长在哪种场景下呢？看一组基准测试：
+
+```go
+package main
+
+import (
+	"sync"
+	"testing"
+)
+
+var cs1 = 0 // 模拟临界区要保护的数据
+var mu1 sync.Mutex
+
+var cs2 = 0 // 模拟临界区要保护的数据
+var mu2 sync.RWMutex
+
+func BenchmarkWriteSyncByMutex(b *testing.B) {
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			mu1.Lock()
+			cs1++
+			mu1.Unlock()
+		}
+	})
+}
+
+func BenchmarkReadSyncByMutex(b *testing.B) {
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			mu1.Lock()
+			_ = cs1
+			mu1.Unlock()
+		}
+	})
+}
+
+func BenchmarkReadSyncByRWMutex(b *testing.B) {
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			mu2.RLock()
+			_ = cs2
+			mu2.RUnlock()
+		}
+	})
+}
+
+func BenchmarkWriteSyncByRWMutex(b *testing.B) {
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			mu2.Lock()
+			cs2++
+			mu2.Unlock()
+		}
+	})
+}
+```
+
+```shell
+$ go test -bench="Write|Read" -cpu=2,8,16,32
+```
 
 
 
@@ -7755,13 +7889,19 @@ PASS
 - RWMutex的读锁性能并没有随着并发量的增大，而发生较大变化，性能始终恒定在40ns左右；
 - 在并发量较大的情况下，RWMutex的写锁性能和Mutex、RWMutex读锁相比，是最差的，并且随着并发量增大，RWMutex写锁性能有继续下降趋势。
 
-**读写锁适合应用在具有一定并发量且读多写少的场合**。
+**读写锁适合应用在具有一定并发量且读多写少的场合**。在大量并发读的情况下，多个Goroutine可以同时持有读锁，从而减少在锁竞争中等待的时间。
 
-
+而互斥锁，即便是读请求的场合，同一时刻也只能有一个Goroutine持有锁，其他Goroutine只能阻塞在加锁操作上等待被调度。
 
 ### 34.4 条件变量
 
 `sync.Cond`是传统的条件变量原语概念在Go语言中的实现。
+
+可以把一个条件变量理解为一个容器，这个容器中存放着一个或一组等待着某个条件成立的Goroutine。当条件成立后，这些处于等待状态的Goroutine将得到通知，并被唤醒继续进行后续的工作。这与百米飞人大战赛场上，各位运动员等待裁判员的发令枪声的情形十分类似。
+
+条件变量是同步原语的一种，如果没有条件变量，开发人员可能需要在Goroutine中通过连续轮询的方式，检查某条件是否为真，这种连续轮询非常消耗资源，因为Goroutine在这个过程中是处于活动状态的，但它的工作又没有进展。
+
+🔖
 
 
 
@@ -7770,6 +7910,10 @@ PASS
 `atomic`包
 
 原子操作（atomic operations）是相对于普通指令操作而言的。
+
+🔖
+
+
 
 ### 小结
 
