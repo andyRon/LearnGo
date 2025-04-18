@@ -1,9 +1,29 @@
 package main
 
-import "sync"
+import (
+	"fmt"
+	"sync"
+)
 
 func main() {
+	// 封装好的计数器
+	var counter Counter2
 
+	var wg sync.WaitGroup
+	wg.Add(10)
+
+	// 启动10个goroutine
+	for i := 0; i < 10; i++ {
+		go func() {
+			defer wg.Done()
+			// 累加10万次
+			for j := 0; j < 100000; j++ {
+				counter.Incr()
+			}
+		}()
+	}
+	wg.Wait()
+	fmt.Println(counter.Count())
 }
 
 // 线程安全的计数器类型
@@ -28,4 +48,3 @@ func (c *Counter2) Count() uint64 {
 	defer c.mu.Unlock()
 	return c.count
 }
-

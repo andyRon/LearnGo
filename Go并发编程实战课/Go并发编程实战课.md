@@ -15,7 +15,7 @@ Go并发编程实战课
 
 - 在面对并发难题时，感觉无从下手，**不知道该用什么并发原语来解决问题**。
 - 如果多个并发原语都可以解决问题，那么，**究竟哪个是最优解呢**？比如说是用互斥锁，还是用Channel。
-- **不知道如何编排并发任务**。并发编程不像是传统的串行编程，程序的运行存在着很大的不确定性。这个时候，就会面临一个问题，**怎么才能让相应的任务按照你设想的流程运行呢？**
+- **不知道如何编排并发任务**。并发编程不像是传统的串行编程，程序的运行存在着很大的**不确定性**。这个时候，就会面临一个问题，**怎么才能让相应的任务按照你设想的流程运行呢？**
 - 有时候，按照正常理解的并发方式去实现的程序，结果莫名其妙就panic或者死锁了，**排查起来非常困难**。
 - **已知的并发原语都不能解决并发问题**，程序写起来异常复杂，而且代码混乱，容易出错。
 
@@ -31,7 +31,18 @@ Go中有一个大的方向，就是**==任务编排用Channel，共享资源保�
 
 
 
+进阶，创造出自己需要的并发原语中的创造有两层含义：
 
+- 第一层是==对既有的并发原语进行组合==，使用两个、三个或者更多的并发原语去解决问题。比如说，可以通过信号量和WaitGroup组合成一个新的并发原语，这个并发原语可以使用有限个goroutine并发处理子任务。
+- 第二层含义是“无中生有”，根据已经掌握的并发原语的设计经验，创造出合适的新的并发原语，以应对一些特殊的并发问题。比如说，标准库中并没有信号量，你可以自己创造出这个类型。
+
+
+
+3个目标：
+
+- 建立起一个丰富的并发原语库；
+- 熟知每一种并发原语的实现机制和适用场景；
+- 能够创造出自己需要的并发原语。
 
 
 
@@ -61,9 +72,9 @@ Go中有一个大的方向，就是**==任务编排用Channel，共享资源保�
 
 ![](images/image-20250221003140792.png)
 
-互斥锁很好地解决了==资源竞争问题==，也它叫做==排它锁==。在Go 标准库中，通过 Mutex 来实现互斥锁。
+互斥锁很好地解决了==资源竞争问题==，也它叫做==排它锁==。在Go标准库中，通过Mutex来实现互斥锁。
 
-Mutex是使用最广泛的==同步原语==（Synchronization primitives，也叫做**并发原语**，并发原语的指代范围更大，还可以包括**任务编排**的类型，所以后面讲Channel或者扩展类型时也会用并发原语）。
+Mutex是使用最广泛的==同步原语==（Synchronization primitives，也叫做**并发原语**，但并发原语的指代范围更大，还可以包括**任务编排**的类型，所以后面讲Channel或者扩展类型时也会用并发原语）。
 
 **互斥锁Mutex、读写锁RWMutex、并发编排WaitGroup、条件变量Cond、Channel**等同步原语。
 
@@ -148,7 +159,7 @@ $ go run counter.go
 
 Go提供了一个**检测并发访问共享资源是否有问题**的工具： **race detector** 🔖，它可以帮助我们自动发现程序有没有data race的问题。
 
-Go race detector是基于Google的 **C/C++ sanitizers** 技术实现的，编译器通过探测所有的内存访问，加入代码能监视对这些内存地址的访问（读还是写）。在代码运行的时候，race detector就能监控到对共享变量的非同步访问，出现race的时候，就会打印出警告信息。
+Go race detector是基于Google的 **C/C++ sanitizers** 技术实现的，编译器通过探测所有的内存访问，加入代码能监视对这些内存地址的访问（读还是写）。在代码运行的时候，race detector就能监控到对共享变量的**非同步访问**🔖，出现race的时候，就会打印出警告信息。
 
 这个技术在Google内部帮了大忙，探测出了Chromium等代码的大量并发问题。Go 1.1中就引入了这种技术，并且一下子就发现了标准库中的42个并发问题。现在，race detector已经成了Go持续集成过程中的一部分。
 
@@ -210,6 +221,10 @@ go tool compile -race -S counter.go
 
 
 
+
+
+这里的共享资源是count变量，临界区是count++，只要在临界区前面获取锁，在离开临界区的时候释放锁，就能完美地解决data race的问题了。
+
 ```go
 	// 互斥锁保护计数器
 	var mu sync.Mutex
@@ -241,7 +256,7 @@ $ go run -race counter2.go
 1000000
 ```
 
-> 注意：Mutex的零值是还没有goroutine等待的未加锁的状态，所以不需要额外的初始化，直接声明变量（如 var mu sync.Mutex）即可。
+> 注意：Mutex的零值是**还没有goroutine等待的未加锁的状态**，所以不需要额外的初始化，直接声明变量（如 var mu sync.Mutex）即可。
 
 
 
@@ -289,7 +304,53 @@ type Counter struct {
 
 
 
-**如果嵌入的struct有多个字段，我们一般会把Mutex放在要控制的字段上面，然后使用空格把字段分隔开来。**  这样代码逻辑更清晰，之后更容易维护。甚至，还可以把获取锁、释放锁、计数加一的逻辑封装成一个方法，对外不需要暴露锁等逻辑：
+**如果嵌入的struct有多个字段，我们一般会把Mutex放在要控制的字段上面，然后使用空格把字段分隔开来。**  这样代码逻辑更清晰，之后更容易维护。甚至，还可以**把获取锁、释放锁、计数加一的逻辑封装成一个方法**，对外不需要暴露锁等逻辑：
+
+```go
+func main() {
+	// 封装好的计数器
+	var counter Counter2
+
+	var wg sync.WaitGroup
+	wg.Add(10)
+
+	// 启动10个goroutine
+	for i := 0; i < 10; i++ {
+		go func() {
+			defer wg.Done()
+			// 累加10万次
+			for j := 0; j < 100000; j++ {
+				counter.Incr()
+			}
+		}()
+	}
+	wg.Wait()
+	fmt.Println(counter.Count())
+}
+
+// 线程安全的计数器类型
+type Counter2 struct {
+	CounterType int
+	name        string
+
+	mu    sync.Mutex
+	count uint64
+}
+
+// 加1的方法内部使用互拆锁保护
+func (c *Counter2) Incr() {
+	c.mu.Lock()
+	c.count++
+	c.mu.Unlock()
+}
+
+// 得到计数器的值，也需要互斥锁保护
+func (c *Counter2) Count() uint64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.count
+}
+```
 
 
 
@@ -321,41 +382,41 @@ Mutex的架构演进分成了四个阶段：
 Russ Cox在2008年提交的第一版Mutex，通过一个flag变量，标记当前的锁是否被某个goroutine持有。如果这个flag的值是1，就代表锁已经被持有，那么，其它竞争的goroutine只能等待；如果这个flag的值是0，就可以通过==CAS（compare-and-swap，或者compare-and-set）==将这个flag设置为1，标识锁被当前的这个goroutine持有了。
 
 ```go
-		// CAS操作，当时还没有抽象出atomic包
-    func cas(val *int32, old, new int32) bool
-    func semacquire(*int32)
-    func semrelease(*int32)
-    // 互斥锁的结构，包含两个字段
-    type Mutex struct {
-        key  int32 // 锁是否被持有的标识
-        sema int32 // 信号量专用，用以阻塞/唤醒goroutine
+// CAS操作，当时还没有抽象出atomic包
+func cas(val *int32, old, new int32) bool
+func semacquire(*int32)
+func semrelease(*int32)
+// 互斥锁的结构，包含两个字段
+type Mutex struct {
+  key  int32 // 锁是否被持有的标识
+  sema int32 // 信号量专用，用以阻塞/唤醒goroutine
+}
+
+// 保证成功在val上增加delta的值
+func xadd(val *int32, delta int32) (new int32) {
+  for {
+    v := *val
+    if cas(val, v, v+delta) {
+      return v + delta
     }
-    
-    // 保证成功在val上增加delta的值
-    func xadd(val *int32, delta int32) (new int32) {
-        for {
-            v := *val
-            if cas(val, v, v+delta) {
-                return v + delta
-            }
-        }
-        panic("unreached")
-    }
-    
-    // 请求锁
-    func (m *Mutex) Lock() {
-        if xadd(&m.key, 1) == 1 { //标识加1，如果等于1，成功获取到锁
-            return
-        }
-        semacquire(&m.sema) // 否则阻塞等待
-    }
-    
-    func (m *Mutex) Unlock() {
-        if xadd(&m.key, -1) == 0 { // 将标识减去1，如果等于0，则没有其它等待者
-            return
-        }
-        semrelease(&m.sema) // 唤醒其它阻塞的goroutine
-    }    
+  }
+  panic("unreached")
+}
+
+// 请求锁
+func (m *Mutex) Lock() {
+  if xadd(&m.key, 1) == 1 { //标识加1，如果等于1，成功获取到锁
+    return
+  }
+  semacquire(&m.sema) // 否则阻塞等待
+}
+
+func (m *Mutex) Unlock() {
+  if xadd(&m.key, -1) == 0 { // 将标识减去1，如果等于0，则没有其它等待者
+    return
+  }
+  semrelease(&m.sema) // 唤醒其它阻塞的goroutine
+}    
 ```
 
 > **==CAS指令==**将给定的值和一个内存地址中的值进行比较，如果它们是同一个值，就使用新值替换内存地址中的值，这个操作是**原子性**的。
@@ -379,7 +440,7 @@ Russ Cox在2008年提交的第一版Mutex，通过一个flag变量，标记当�
 
 总结，初版的Mutex利用CAS原子操作，对key这个标志量进行设置。key不仅仅标识了锁是否被goroutine所持有，还记录了当前持有和等待获取锁的goroutine的数量。
 
-注意，**Unlock方法可以被任意的goroutine调用释放锁，即使是没持有这个互斥锁的goroutine，也可以进行这个操作。这是因为，Mutex本身并没有包含持有这把锁的goroutine的信息，所以，Unlock也不会对此进行检查。Mutex的这个设计一直保持至今。**
+注意，**Unlock方法可以被任意的goroutine调用释放锁，即使是没持有这个互斥锁的goroutine，也可以进行这个操作。这是因为，==Mutex本身并没有包含持有这把锁的goroutine的信息==，所以，Unlock也不会对此进行检查。Mutex的这个设计一直保持至今。**
 
 🔖
 
@@ -402,7 +463,9 @@ const (
 
 ![](images/image-20250322180827562.png)
 
-state是一个复合型的字段，一个字段包含多个意义，这样可以通过尽可能少的内存来实现互斥锁。这个字段的第一位（最小的一位）来表示这个锁是否被持有，第二位代表是否有唤醒的goroutine，剩余的位数代表的是等待此锁的goroutine数。所以，state这一个字段被分成了三部分，代表三个数据。
+state是一个复合型的字段，一个字段包含多个意义，这样可以通过尽可能少的内存来实现互斥锁。
+
+这个字段的第一位（最小的一位）来表示这个锁是否被持有，第二位代表是否有唤醒的goroutine，剩余的位数代表的是等待此锁的goroutine数。所以，state这一个字段被分成了三部分，代表三个数据。
 
 请求锁的方法Lock也变得复杂了:
 
@@ -436,7 +499,17 @@ func (m *Mutex) Lock() {
 }
 ```
 
+首先是通过CAS检测state字段中的标志（第3行），如果没有goroutine持有锁，也没有等待持有锁的gorutine，那么，当前的goroutine就很幸运，可以直接获得锁，这也是注释中的Fast path的意思。
+
 🔖
+
+
+
+请求锁的goroutine有两类，一类是新来请求锁的goroutine，另一类是被唤醒的等待请求锁的goroutine。
+
+锁的状态也有两种：加锁和未加锁。
+
+用一张表格，来说明一下goroutine不同来源不同状态下的处理逻辑：
 
 ![](images/image-20250322181033581.png)
 
@@ -477,7 +550,7 @@ func (m *Mutex) Unlock() {
 
 ### 2.3 多给些机会
 
-2015年2月，如果新来的goroutine或者是被唤醒的goroutine首次获取不到锁，它们就会通过自旋（spin，通过循环不断尝试，spin的逻辑是在runtime实现的）的方式，尝试检查锁是否被释放。在尝试一定的自旋次数后，再执行原来的逻辑。
+2015年2月，如果新来的goroutine或者是被唤醒的goroutine首次获取不到锁，它们就会通过**自旋（spin**，通过循环不断尝试，spin的逻辑是在runtime实现的）的方式，尝试检查锁是否被释放。在尝试一定的自旋次数后，再执行原来的逻辑。
 
 ```go
 func (m *Mutex) Lock() {
@@ -521,17 +594,170 @@ func (m *Mutex) Lock() {
 }
 ```
 
+如果可以spin的话，第9行的for循环会重新检查锁是否释放。对于临界区代码执行非常短的场景来说，这是一个非常好的优化。
 
+因为临界区的代码耗时很短，锁很快就能释放，而抢夺锁的goroutine不用通过休眠唤醒方式等待调度，直接spin几次，可能就获得了锁。
 
 ### 2.4 解决饥饿
 
 经过几次优化，Mutex的代码越来越复杂，应对高并发争抢锁的场景也更加公平。
 
-**饥饿问题**
+新来的goroutine也参与竞争，有可能每次都会被新来的goroutine抢到获取锁的机会，在极端情况下，等待中的goroutine可能会一直获取不到锁，这就是**饥饿问题**。
+
+2016年Go 1.9中Mutex增加了饥饿模式，让锁变得更公平，不公平的等待时间限制在**1毫秒**，并且修复了一个大Bug：**总是把唤醒的goroutine放在等待队列的尾部，会导致更加不公平的等待时间。**
+
+2018年，Go开发者将fast path和slow path拆成独立的方法，以便内联，提高性能。
+
+2019年优化，虽然没有对Mutex做修改，但是，对于Mutex唤醒后持有锁的那个waiter，调度器可以有更高的优先级去执行，这已经是很细致的性能优化了。
+
+![](images/image-20250418111856208.png)
+
+只需要记住，Mutex绝不容忍一个goroutine被落下，永远没有机会获取锁。不抛弃不放弃是它的宗旨，而且它也尽可能地让等待较长的goroutine更有机会获取到锁。
+
+```go
+type Mutex struct {
+	state int32
+	sema  uint32
+}
+
+const (
+	mutexLocked = 1 << iota // mutex is locked
+	mutexWoken
+	mutexStarving         // 从state字段中分出一个饥饿标记
+	mutexWaiterShift      = iota
+	starvationThresholdNs = 1e6
+)
+
+func (m *Mutex) Lock() {
+	// Fast path: 幸运之路，一下就获取到了锁
+	if atomic.CompareAndSwapInt32(&m.state, 0, mutexLocked) {
+		return
+	}
+
+	// Slow path：缓慢之路，尝试自旋竞争或饥饿状态下饥饿goroutine竞争
+	m.lockSlow()
+}
+
+func (m *Mutex) lockSlow() {
+	var waitStartTime int64
+	starving := false // 此goroutine的饥饿标记
+	awoke := false    // 唤醒标记
+	iter := 0         // 自旋次数
+	old := m.state    // 当前的锁的状态
+
+	for {
+		// 锁是非饥饿状态，锁还没被释放，尝试自旋
+		if old&(mutexLocked|mutexStarving) == mutexLocked && runtime_canSpin(iter) {
+			if !awoke && old&mutexWoken == 0 && old>>mutexWaiterShift != 0 &&
+				atomic.CompareAndSwapInt32(&m.state, old, old|mutexWoken) {
+				awoke = true
+			}
+			runtime_doSpin()
+			iter++
+			old = m.state // 再次获取锁的状态，之后会检查是否锁被释放了
+			continue
+		}
+
+		new := old
+		if old&mutexStarving == 0 {
+			new |= mutexLocked // 非饥饿状态，加锁
+		}
+		if old&(mutexLocked|mutexStarving) != 0 {
+			new += 1 << mutexWaiterShift // waiter数量加1
+		}
+		if starving && old&mutexLocked != 0 {
+			new |= mutexStarving // 设置饥饿状态
+		}
+		if awoke {
+			if new&mutexWoken == 0 {
+				throw("sync: inconsistent mutex state")
+			}
+			new &^= mutexWoken // 新状态清除唤醒标记
+		}
+
+		// 成功设置新状态
+		if atomic.CompareAndSwapInt32(&m.state, old, new) {
+			// 原来锁的状态已释放，并且不是饥饿状态，正常请求到了锁，返回
+			if old&(mutexLocked|mutexStarving) == 0 {
+				break // locked the mutex with CAS
+			}
+
+			// 处理饥饿状态
+
+			// 如果以前就在队列里面，加入到队列头
+			queueLifo := waitStartTime != 0
+			if waitStartTime == 0 {
+				waitStartTime = runtime_nanotime()
+			}
+
+			// 阻塞等待
+			runtime_SemacquireMutex(&m.sema, queueLifo, 1)
+
+			// 唤醒之后检查锁是否应该处于饥饿状态
+			starving = starving || runtime_nanotime()-waitStartTime > starvationThresholdNs
+			old = m.state
+
+			// 如果锁已经处于饥饿状态，直接抢到锁，返回
+			if old&mutexStarving != 0 {
+				if old&(mutexLocked|mutexWoken) != 0 || old>>mutexWaiterShift == 0 {
+					throw("sync: inconsistent mutex state")
+				}
+				// 有点绕，加锁并且将waiter数减1
+				delta := int32(mutexLocked - 1<<mutexWaiterShift)
+				if !starving || old>>mutexWaiterShift == 1 {
+					delta -= mutexStarving // 最后一个waiter或者已经不饥饿了，清除饥饿标记
+
+				}
+
+				atomic.AddInt32(&m.state, delta)
+				break
+			}
+
+			awoke = true
+			iter = 0
+		} else {
+			old = m.state
+		}
+	}
+}
+
+func (m *Mutex) Unlock() {
+	// Fast path: drop lock bit.
+	new := atomic.AddInt32(&m.state, -mutexLocked)
+	if new != 0 {
+		m.unlockSlow(new)
+	}
+}
+
+func (m *Mutex) unlockSlow(new int32) {
+
+	if (new+mutexLocked)&mutexLocked == 0 {
+		throw("sync: unlock of unlocked mutex")
+	}
+
+	if new&mutexStarving == 0 {
+		old := new
+		for {
+			if old>>mutexWaiterShift == 0 || old&(mutexLocked|mutexWoken|mutexStarving) != 0 {
+				return
+			}
+
+			new = (old - 1<<mutexWaiterShift) | mutexWoken
+			if atomic.CompareAndSwapInt32(&m.state, old, new) {
+				runtime_Semrelease(&m.sema, false, 1)
+				return
+			}
+			old = m.state
+		}
+	} else {
+		runtime_Semrelease(&m.sema, true, 1)
+	}
+}
+```
+
+
 
 🔖
-
-
 
 ### 2.5 饥饿模式和正常模式
 
@@ -1073,7 +1299,7 @@ Once可以用来执行且仅仅执行一次动作，常常用于单例对象的�
 
 # 二、原子操作
 
-Go标准库中提供的原子操作。原子操作是其它并发原语的基础，学会了就可以自己创造新的并发原语。
+Go标准库中提供的原子操作。==原子操作是其它并发原语的基础==，学会了就可以自己创造新的并发原语。
 
 ## 12 atomic：要保证原子操作，一定要使用这几种方法
 
@@ -1409,7 +1635,7 @@ gollback也是用来处理一组子任务的执行的，不过它解决了ErrGro
 
 # 五、分布式并发原语
 
-分布式并发原语是应对大规模的应用程序中并发问题的并发类型。
+分布式并发原语是应对**大规模的应用程序中并发问题**的并发类型。
 
 介绍使用etcd实现的一些分布式并发原语，比如**Leader选举、分布式互斥锁、分布式读写锁、分布式队列**等，在处理分布式场景的并发问题时，特别有用。
 
