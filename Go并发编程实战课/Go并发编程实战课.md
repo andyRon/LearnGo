@@ -755,6 +755,37 @@ func (m *Mutex) unlockSlow(new int32) {
 }
 ```
 
+`state` 字段是一个 int32 类型的整数，它通过位标志来存储互斥锁的多种状态。
+
+位标志的位置：
+
+- mutexLocked：位 0（值为 1），表示锁是否被锁定
+- mutexWoken：位 1（值为 2），表示是否有 goroutine 被唤醒
+- mutexStarving：位 2（值为 4），表示是否处于饥饿模式
+- mutexWaiterShift：值为 3，用于计算等待者数量的位移量
+
+state 字段的结构：
+
+- 位 0-2：存储上述三个标志（mutexLocked、mutexWoken、mutexStarving）
+- 位 3+：存储等待的 goroutine 数量（通过 mutexWaiterShift 进行位移计算）
+
+具体关系：
+
+- 如果 `state & mutexLocked != 0`，表示锁被锁定
+- 如果 `state & mutexWoken != 0`，表示有 goroutine 被唤醒
+- 如果 `state & mutexStarving != 0`，表示处于饥饿模式
+- 等待的 goroutine 数量可以通过 `state >> mutexWaiterShift` 计算得到
+
+示例：
+假设 state 的值为 0b10101（二进制）：
+
+- mutexLocked：`0b10101 & 0b001 = 1`，表示锁被锁定
+- mutexWoken：`0b10101 & 0b010 = 0`，表示没有 goroutine 被唤醒
+- mutexStarving：`0b10101 & 0b100 = 4`，表示处于饥饿模式
+- 等待的 goroutine 数量：`0b10101 >> 3 = 0b10 = 2`，表示有 2 个 goroutine 在等待
+
+这种设计通过一个 32 位整数高效地存储了互斥锁的多种状态，同时使用位操作和位移计算来快速获取和更新这些状态。
+
 
 
 🔖
@@ -779,13 +810,15 @@ Go创始者的哲学，就是他们**强调Go语言和标准库的稳定性**，
 
 ## 3 Mutex：4种易错场景大盘点
 
-
+当前Mutex的实现复杂，主要是**针对饥饿模式和公平性问题，做了一些额外处理**。但Mutex使用起来还是非常简单的，它只有Lock和Unlock两个方法。
 
 ### 3.1 常见的4种错误场景
 
 #### 1️⃣Lock/Unlock不是成对出现
 
+Lock/Unlock没有成对出现，就意味着会出现死锁的情况，或者是因为Unlock一个未加锁的Mutex而导致panic。
 
+缺少unlock主要三种情况：
 
 - 代码中有太多的if-else分支，可能在某个分支中漏写了Unlock；
 - 在重构的时候把Unlock给删除了；
@@ -793,28 +826,231 @@ Go创始者的哲学，就是他们**强调Go语言和标准库的稳定性**，
 
 
 
-死锁的检查机制（checkdead() 方法）
+```go
+func foo() {
+    var mu sync.Mutex
+    defer mu.Unlock()
+    fmt.Println("hello world!")
+}
+```
+
+![](images/image-20250421100617126.png)
+
+#### 2️⃣Copy已使用的Mutex
+
+🔖
+
+```go
+type Counter struct {
+    sync.Mutex
+    Count int
+}
+
+
+func main() {
+    var c Counter
+    c.Lock()
+    defer c.Unlock()
+    c.Count++
+    foo(c) // 复制锁
+}
+
+// 这里Counter的参数是通过复制的方式传入的
+func foo(c Counter) {
+    c.Lock()
+    defer c.Unlock()
+    fmt.Println("in foo")
+}
+```
+
+在调用 foo 函数的时候，调用者会复制 Mutex 变量 c 作为 foo 函数的参数，不幸的是，复制之前已经使用了这个锁，这就导致，复制的 Counter 是一个带状态 Counter。
+
+Go 在运行时，有**==死锁的检查机制==**（`checkdead()` 方法），它能够发现死锁的 goroutine。这个例子中因为复制了一个使用了的 Mutex，导致锁无法使用，程序处于死锁的状态。程序运行的时候，死锁检查机制能够发现这种死锁情况并输出错误信息，如下图中错误信息以及错误堆栈：
+
+![](images/image-20250421101531968.png)
+
+想在运行前发现问题，可以使用 vet 工具，把检查写在 Makefile 文件中，在持续集成的时候跑一跑，这样可以及时发现问题，及时修复。
+
+![](images/image-20250421101756525.png)
+
+##### vet 工具是怎么发现 Mutex 复制使用问题的呢？
+
+通过[copylock](https://github.com/golang/tools/blob/master/go/analysis/passes/copylock/copylock.go)分析器静态分析实现的。这个分析器会分析函数调用、range 遍历、复制、声明、函数返回值等位置，有没有锁的值 copy 的情景，以此来判断有没有问题。
+
+🔖
+
+#### 3️⃣重入
+
+> Java ReentrantLock(可重入锁)
+
+当一个线程获取锁时，如果没有其它线程拥有这个锁，那么，这个线程就成功获取到这个锁。之后，如果其它线程再请求这个锁，就会处于阻塞等待的状态。但是，如果拥有这把锁的线程再请求这把锁的话，不会阻塞，而是成功返回，所以叫==可重入锁==（有时候也叫做==递归锁==）。只要你拥有这把锁，你可以可着劲儿地调用，比如通过递归实现一些算法，调用者不会阻塞或者死锁。
+
+**Mutex不是可重入的锁**。
+
+因为Mutex的实现中没有记录哪个goroutine拥有这把锁。理论上，任何goroutine都可以随意地Unlock这把锁，所以没办法计算重入条件。
+
+```go
+func foo(l sync.Locker) {
+    fmt.Println("in foo")
+    l.Lock()
+    bar(l)
+    l.Unlock()
+}
+
+
+func bar(l sync.Locker) {
+    l.Lock()
+    fmt.Println("in bar")
+    l.Unlock()
+}
+
+
+func main() {
+    l := &sync.Mutex{}
+    foo(l)
+}
+```
+
+![](images/image-20250421102615405.png)
 
 
 
-#### Copy已使用的Mutex
+自己实现一个可重入锁，关键记住当前是哪个 goroutine 持有这个锁。两个方案：🔖
+
+##### 方案一：goroutine id
+
+通过 hacker 的方式获取到 goroutine id，记录下获取锁的 goroutine id，它可以实现 Locker 接口。
 
 
 
-#### 重入
+##### 方案二：token
+
+调用 Lock/Unlock 方法时，由 goroutine 提供一个 token，用来标识它自己，而不是我们通过 hacker 的方式获取到 goroutine id，但是，这样一来，就不满足 Locker 接口了。
 
 
 
-#### 死锁
 
-两个或两个以上的进程（或线程，goroutine）在执行过程中，因争夺共享资源而处于一种互相等待的状态，如果没有外部干涉，它们都将无法推进下去，此时，我们称系统处于**死锁状态或系统产生了死锁**。
+
+可重入锁（递归锁）解决了代码重入或者递归调用带来的死锁问题，同时它也带来了另一个好处，就是我们可以要求，只有持有锁的 goroutine 才能 unlock 这个锁。这也很容易实现，因为在上面这两个方案中，都已经记录了是哪一个 goroutine 持有这个锁。
+
+
+
+#### 4️⃣死锁
+
+两个或两个以上的进程（或线程，goroutine）在执行过程中，因争夺共享资源而处于一种互相等待的状态，如果没有外部干涉，它们都将无法推进下去，此时，我们称系统处于**死锁状态或系统产生了==死锁==**。
 
 想避免死锁，只要破坏这四个条件中的一个或者几个：
 
 - **互斥**： 至少一个资源是被排他性独享的，其他线程必须处于等待状态，直到资源被释放。
+
 - **持有和等待**：goroutine持有一个资源，并且还在请求其它goroutine持有的资源，也就是咱们常说的“吃着碗里，看着锅里”的意思。
+
 - **不可剥夺**：资源只能由持有它的goroutine来释放。
+
 - **环路等待**：一般来说，存在一组等待进程，P={P1，P2，…，PN}，P1等待P2持有的资源，P2等待P3持有的资源，依此类推，最后是PN等待P1持有的资源，这就形成了一个环路等待的死结
+
+  ![](images/image-20250421103013976.png)
+
+一个经典的死锁问题就是[哲学家就餐问题](https://zh.wikipedia.org/wiki/%E5%93%B2%E5%AD%A6%E5%AE%B6%E5%B0%B1%E9%A4%90%E9%97%AE%E9%A2%98)，死锁问题在现实生活中也比比皆是。
+
+例子，有一次我去派出所开证明，派出所要求物业先证明我是本物业的业主，但是，物业要我提供派出所的证明，才能给我开物业证明，结果就陷入了死锁状态。你可以把派出所和物业看成两个 goroutine，派出所证明和物业证明是两个资源，双方都持有自己的资源而要求对方的资源，而且自己的资源自己持有，不可剥夺。
+
+```go
+func main() {
+    // 派出所证明
+    var psCertificate sync.Mutex
+    // 物业证明
+    var propertyCertificate sync.Mutex
+
+
+    var wg sync.WaitGroup
+    wg.Add(2) // 需要派出所和物业都处理
+
+
+    // 派出所处理goroutine
+    go func() {
+        defer wg.Done() // 派出所处理完成
+
+
+        psCertificate.Lock()
+        defer psCertificate.Unlock()
+
+
+        // 检查材料
+        time.Sleep(5 * time.Second)
+        // 请求物业的证明
+        propertyCertificate.Lock()
+        propertyCertificate.Unlock()
+    }()
+
+
+    // 物业处理goroutine
+    go func() {
+        defer wg.Done() // 物业处理完成
+
+
+        propertyCertificate.Lock()
+        defer propertyCertificate.Unlock()
+
+
+        // 检查材料
+        time.Sleep(5 * time.Second)
+        // 请求派出所的证明
+        psCertificate.Lock()
+        psCertificate.Unlock()
+    }()
+
+
+    wg.Wait()
+    fmt.Println("成功完成")
+}
+```
+
+
+
+
+
+```sh
+$ go run deadlock.go
+fatal error: all goroutines are asleep - deadlock!
+
+goroutine 1 [sync.WaitGroup.Wait]:
+sync.runtime_SemacquireWaitGroup(0x140000021c0?)
+        /opt/homebrew/Cellar/go/1.24.2/libexec/src/runtime/sema.go:110 +0x2c
+sync.(*WaitGroup).Wait(0x14000102030)
+        /opt/homebrew/Cellar/go/1.24.2/libexec/src/sync/waitgroup.go:118 +0x70
+main.main()
+        /Users/andyron/myfield/github/LearnGo/Go并发编程实战课/go-concurrent/ch03/deadlock.go:46 +0x118
+
+goroutine 34 [sync.Mutex.Lock]:
+internal/sync.runtime_SemacquireMutex(0x0?, 0x0?, 0x0?)
+        /opt/homebrew/Cellar/go/1.24.2/libexec/src/runtime/sema.go:95 +0x28
+internal/sync.(*Mutex).lockSlow(0x14000102028)
+        /opt/homebrew/Cellar/go/1.24.2/libexec/src/internal/sync/mutex.go:149 +0x170
+internal/sync.(*Mutex).Lock(...)
+        /opt/homebrew/Cellar/go/1.24.2/libexec/src/internal/sync/mutex.go:70
+sync.(*Mutex).Lock(...)
+        /opt/homebrew/Cellar/go/1.24.2/libexec/src/sync/mutex.go:46
+main.main.func1()
+        /Users/andyron/myfield/github/LearnGo/Go并发编程实战课/go-concurrent/ch03/deadlock.go:28 +0x140
+created by main.main in goroutine 1
+        /Users/andyron/myfield/github/LearnGo/Go并发编程实战课/go-concurrent/ch03/deadlock.go:19 +0xb0
+
+goroutine 35 [sync.Mutex.Lock]:
+internal/sync.runtime_SemacquireMutex(0x0?, 0x0?, 0x0?)
+        /opt/homebrew/Cellar/go/1.24.2/libexec/src/runtime/sema.go:95 +0x28
+internal/sync.(*Mutex).lockSlow(0x14000102020)
+        /opt/homebrew/Cellar/go/1.24.2/libexec/src/internal/sync/mutex.go:149 +0x170
+internal/sync.(*Mutex).Lock(...)
+        /opt/homebrew/Cellar/go/1.24.2/libexec/src/internal/sync/mutex.go:70
+sync.(*Mutex).Lock(...)
+        /opt/homebrew/Cellar/go/1.24.2/libexec/src/sync/mutex.go:46
+main.main.func2()
+        /Users/andyron/myfield/github/LearnGo/Go并发编程实战课/go-concurrent/ch03/deadlock.go:42 +0x140
+created by main.main in goroutine 1
+        /Users/andyron/myfield/github/LearnGo/Go并发编程实战课/go-concurrent/ch03/deadlock.go:33 +0x110
+
+```
 
 
 
@@ -822,21 +1058,29 @@ Go创始者的哲学，就是他们**强调Go语言和标准库的稳定性**，
 
 #### Docker
 
+[issue 36114](https://github.com/moby/moby/pull/36114/files)
 
+
+
+[issue 34881](https://github.com/moby/moby/pull/34881/files) 
 
 #### Kubernetes
 
+issue 72361
 
 
 
+issue 45192
 
 #### gRPC
 
+issue 795
 
 
 
+#### etcd
 
-
+issue 10419
 
 ## 4 Mutex：骇客编程，如何拓展额外功能？
 
@@ -895,7 +1139,27 @@ func (m *Mutex) TryLock() bool {
 
 
 
+```go
+const (
+    mutexLocked = 1 << iota // mutex is locked
+    mutexWoken
+    mutexStarving
+    mutexWaiterShift = iota
+)
 
+type Mutex struct {
+    sync.Mutex
+}
+
+func (m *Mutex) Count() int {
+    // 获取state字段的值
+    v := atomic.LoadInt32((*int32)(unsafe.Pointer(&m.Mutex)))
+    v = v >> mutexWaiterShift + (v & mutexLocked)
+    return int(v)
+}
+```
+
+🔖
 
 ### 4.3 使用Mutex实现一个线程安全的队列
 
@@ -903,7 +1167,17 @@ func (m *Mutex) TryLock() bool {
 
 
 
+### 总结
+
+Mutex是package sync的基石，其他的一些同步原语也是基于它实现的。
+
 ![](images/00030.jpeg)
+
+
+
+### 思考题
+
+> 可以为Mutex获取锁时加上Timeout机制吗？会有什么问题吗？
 
 
 
@@ -922,6 +1196,46 @@ RWMutex在某一时刻只能由任意数量的reader持有，或者是只被单�
 - `Lock`/`Unlock`：写操作时调用的方法。如果锁已经被reader或者writer持有，那么，Lock方法会一直阻塞，直到能获取到锁；Unlock则是配对的释放锁的方法。
 - `RLock`/`RUnlock`：读操作时调用的方法。如果锁已经被writer持有的话，RLock方法会一直阻塞，直到能获取到锁，否则就直接返回；而RUnlock是reader释放锁的方法。
 - `RLocker`：这个方法的作用是**为读操作返回一个Locker接口的对象**。它的Lock方法会调用RWMutex的RLock方法，它的Unlock方法会调用RWMutex的RUnlock方法。
+
+```go
+func main() {
+    var counter Counter
+    for i := 0; i < 10; i++ { // 10个reader
+        go func() {
+            for {
+                counter.Count() // 计数器读操作
+                time.Sleep(time.Millisecond)
+            }
+        }()
+    }
+
+    for { // 一个writer
+        counter.Incr() // 计数器写操作
+        time.Sleep(time.Second)
+    }
+}
+// 一个线程安全的计数器
+type Counter struct {
+    mu    sync.RWMutex
+    count uint64
+}
+
+// 使用写锁保护
+func (c *Counter) Incr() {
+    c.mu.Lock()
+    c.count++
+    c.mu.Unlock()
+}
+
+// 使用读锁保护
+func (c *Counter) Count() uint64 {
+    c.mu.RLock()
+    defer c.mu.RUnlock()
+    return c.count
+}
+```
+
+
 
 
 
