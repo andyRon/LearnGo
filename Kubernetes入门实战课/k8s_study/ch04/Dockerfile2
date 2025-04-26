@@ -1,0 +1,21 @@
+#
+
+FROM alpine:3.25
+FROM ubuntu:bionic
+
+COPY ./a.txt  /tmp/a.txt    # 把构建上下文里的a.txt拷贝到镜像的/tmp目录
+COPY /etc/hosts  /tmp       # 错误！不能使用构建上下文之外的文件
+
+RUN apt-get update \
+  && apt-get intall -y \
+	build-essential \
+	curl \
+	make \
+	unzip \
+  && cd /tmp \
+  && curl -fSL xxx.tar.gz -o xxx.tar.gz \
+  && tar zxf xxx.tar.gz \
+  && cd xxx \
+  && ./config \
+  && make \
+  && make clean

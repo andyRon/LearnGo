@@ -1,0 +1,9 @@
+# 把这些Shell命令集中到一个脚本文件里，用 COPY 命令拷贝进去再用 RUN 来执行
+
+FROM alpine:3.15                # 选择Alpine镜像
+FROM ubuntu:bionic              # 选择Ubuntu镜像
+
+COPY setup.sh  /tmp/                # 拷贝脚本到/tmp目录
+
+RUN cd /tmp && chmod +x setup.sh \  # 添加执行权限
+    && ./setup.sh && rm setup.sh    # 运行脚本然后再删除
