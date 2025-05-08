@@ -2338,3 +2338,63 @@ unsafe包之所以被命名为unsafe，主要是因为该包中定义了unsafe.P
 
 
 
+## 70 了解cgo的原理和使用开销
+
+如下一些场景中，很大可能甚至是不可避免地会使用到cgo来实现Go与C的互操作：
+
+- 为了提升局部代码性能，用C代码替换一些Go代码。在性能方面，C代码之于Go就好比汇编代码之于C。
+- 对Go内存GC的延迟敏感，需要自己手动进行内存管理（分配和释放）；
+- 为一些C语言专有的且没有Go替代品的库制作Go绑定（binding）或包装。比如：Oracle提供了C版本OCI库（Oracle Call Interface），但并未提供Go版本的OCI库以及连接数据库的协议细节，因此我们只能通过包装C语言的OCI版本与Oracle数据库通信。类似的情况还有一些图形驱动程序以及图形化的窗口系统接口（如OpenGL库等）。
+- 与遗留的且很难重写或替换的C代码进行交互。
+
+### 70.1 Go调用C代码的原理
+
+```go
+package main
+
+// #include <stdio.h>
+// #include <stdlib.h>
+//
+// void print(char* s) {
+// 	printf("%s\n", s);
+// }
+import "C"
+import "unsafe"
+
+func main() {
+	s := "Hello, Cgo"
+	cs := C.CString(s)
+	defer C.free(unsafe.Pointer(cs))
+	C.print(cs)
+}
+```
+
+常规的Go代码相比，上述代码有几处特殊的地方：
+
+- C代码直接出现在Go源文件中，只是都以注释的形式存在；
+- 紧邻注释了的C代码块之后（中间没有空行），我们导入了一个名为C的包；
+- 在main函数中通过C这个包调用了C代码中定义的函数print。
+
+
+
+![](images/image-20250508180720176.png)
+
+
+
+### 70.2 在Go中使用C语言的类型
+
+
+
+### 70.3 在Go中链接外部C库
+
+
+
+### 70.4 在C中使用Go函数
+
+
+
+### 70.5 使用cgo的开销
+
+
+
+### 70.6 使用cgo代码的静态构建
