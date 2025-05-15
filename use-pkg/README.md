@@ -128,3 +128,10 @@ https://github.com/go-admin-team/go-admin
 https://github.com/jmoiron/sqlx
 
 https://learnku.com/docs/gorm/v2
+
+
+
+### wails
+
+https://wails.io/zh-Hans/docs/introduction（🔖https://wails.io/zh-Hans/docs/howdoesitwork）
+
