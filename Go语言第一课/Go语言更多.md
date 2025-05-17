@@ -21,6 +21,8 @@ Go语言更多
 
 https://www.topgoer.com/%E5%B8%B8%E7%94%A8%E6%A0%87%E5%87%86%E5%BA%93/
 
+[Golang标准库案例](https://github.com/polaris1119/The-Golang-Standard-Library-by-Example)
+
 ### 47.1 fmt包
 
 #### 向外输出
@@ -692,7 +694,39 @@ Go语言程序在运行期使用reflect包访问程序的反射信息。
 
 ## 49 命令行工具
 
-### 编译命令go build
+### 49.1 模块管理与依赖控制
+
+#### `go mod`
+
+包管理系统
+
+- 初始化模块：`go mod init <模块名>` 创建 go.mod 文件，定义模块路径和版本
+- 依赖整理：`go mod tidy` 自动清理未使用的依赖，同步 go.mod 与实际代码的依赖关系
+- 离线构建：`go mod vendor` 将依赖复制到本地 vendor 目录，支持无网络环境编译
+- 查看模块依赖图：`go mod graph`
+
+#### `go get`
+
+- 安装远程包：`go get github.com/example/包名` 自动下载并安装到 `$GOPATH/pkg/mod`
+- 更新依赖：go get -u 强制更新包至最新版本，需注意版本兼容性风险
+
+
+
+### 49.2 开发与构建
+
+#### `go build`
+
+将Go源文件编译为可执行文件（不运行）:
+
+```
+go build main.go
+```
+
+编译整个模块：
+
+```sh
+go build
+```
 
 go build命令常用参数：
 
@@ -705,7 +739,81 @@ go build命令常用参数：
 -race 开启竞态检测
 ```
 
-### 清理命令go clean
+
+
+- **基本编译**：`go build main.go` 生成可执行文件（默认与目录同名）
+- **优化体积**：go build -ldflags "-s -w" 移除符号表和调试信息，减少二进制文件大小
+- **交叉编译**：GOOS=linux GOARCH=amd64 go build 生成跨平台二进制文件
+
+#### `go run`
+
+编译并立即运行Go程序，适合快速测试。
+
+执行go run命令时也会编译Go源码文件，但生成的可执行文件被存放在临时目录中，并自动运行这个可执行文件。
+
+```go
+func main() {
+	fmt.Println(os.Args)
+}
+```
+
+```sh
+go run main.go -color blue
+[/var/folders/8k/ntbhdf615p34cflx1_qwv38r0000gn/T/go-build692689547/b001/exe/main -color blue]
+```
+
+#### `go install`
+
+编译并安装命令Go程序或包:
+
+```go
+go install
+```
+
+生成的可执行文件会被放到 `$GOPATH/bin` 或模块模式下的 `GOBIN` 路径中。
+
+
+
+### 49.3 代码质量与测试
+
+#### `go test`
+
+- 单元测试：自动执行 `_test.go` 文件中以 Test 开头的函数
+- 覆盖率分析：`go test -coverprofile=cover.out` 生成代码覆盖率报告，通过 `go tool cover -html=cover.out` 可视化
+- 基准测试：`go test -bench=.` 运行以 Benchmark 开头的性能测试函数
+
+#### `go vet`
+
+- 静态检查：`go vet ./...` 检测代码中的潜在错误（如未使用的变量、错误格式化字符串）
+
+#### `go fmt`
+
+对Go源代码进行格式化，符合Go的官方风格：
+
+```go
+go fmt main.go
+```
+
+现在Goland可以自动完成。
+
+
+
+### 49.4 系统交互与调试
+
+#### `go version`
+
+#### `go env`
+
+- 查看环境变量：`go env` 显示 GOPATH、GOROOT 等关键配置
+- 动态修改：`go env -w GOPROXY=https://goproxy.cn` 设置国内镜像加速依赖下载
+
+#### `go list`
+
+- 依赖图谱：`go list -m all` 列出当前模块所有依赖关系
+
+### 49.5 辅助工具
+
+#### `go clean`
 
 清理所有编译生成的文件，具体包括：
 
@@ -724,30 +832,94 @@ go clean命令通常用于使用VCS（版本控制系统，如Git）的团队，
 -testcache	清理测试结果
 ```
 
-### 运行命令go run
 
-执行go run命令时也会编译Go源码文件，但生成的可执行文件被存放在临时目录中，并自动运行这个可执行文件。
 
-```go
-func main() {
-	fmt.Println(os.Args)
-}
-```
+- 清理构建产物：`go clean -modcache` 删除模块缓存，`go clean -x` 显示清理过程细节
+
+
+
+#### `go doc`
+
+- 文档查询：`go doc fmt.Printf` 查看标准库函数文档
 
 ```sh
-go run main.go -color blue
-[/var/folders/8k/ntbhdf615p34cflx1_qwv38r0000gn/T/go-build692689547/b001/exe/main -color blue]
+go doc net/http
+go doc http
+
+go doc http.Get
+
+go doc http.Request.Form
 ```
 
-### 代码格式化命令gofmt
+- 查看当前项目文档
+
+查看当前路径下的包的文档：
+
+```sh
+$ go doc
+```
+
+查看当前路径下包的导出元素的文档：
+
+```sh
+$ go doc core 
+package core // import "github.com/flipped-aurora/gin-vue-admin/server/core"
+
+func RunWindowsServer()
+func Viper() *viper.Viper
+func Zap() (logger *zap.Logger)
+```
+
+非导出元素的文档：
+
+```sh
+$ go doc -u core
+package core // import "github.com/flipped-aurora/gin-vue-admin/server/core"
+
+func RunWindowsServer()
+func Viper() *viper.Viper
+func Zap() (logger *zap.Logger)
+func getConfigPath() (config string)
+type server interface{ ... }
+    func initServer(address string, router *gin.Engine) server
+```
+
+- 查看项目依赖的第三方module的文档
+
+`go doc`在查看项目依赖的第三方module的文档时，会自动到go mod cache中找到该module（已经下载到本地的），并显示其文档：
+
+```sh
+$ go doc github.com/casbin/casbin/v2
+package casbin // import "github.com/casbin/casbin/v2"
+
+func CasbinJsGetPermissionForUser(e IEnforcer, user string) (string, error)
+func CasbinJsGetPermissionForUserOld(e IEnforcer, user string) ([]byte, error)
+func GetCacheKey(params ...interface{}) (string, bool)
+type CacheableParam interface{ ... }
+...
+```
+
+- 查看源码
+
+```sh
+go doc -src fmt.Printf
+
+go doc -src NewClient
+go doc -u -src newPacketWriter
+go doc -src github.com/casbin/casbin/v2 CasbinJsGetPermissionForUser
+```
+
+##### pkgsite
+
+[pkgsite](https://github.com/golang/pkgsite)是官方推出的新版Go包文档站点（本地）。
+
+```sh
+$ go install golang.org/x/pkgsite/cmd/pkgsite@latest
+$ cd myproject
+$ pkgsite 
+```
 
 
-
-### 编译并安装命令go install
-
-
-
-### 获取包命令go get
 
 
 
