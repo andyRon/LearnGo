@@ -23,6 +23,8 @@ https://www.topgoer.com/%E5%B8%B8%E7%94%A8%E6%A0%87%E5%87%86%E5%BA%93/
 
 [Golang标准库案例](https://github.com/polaris1119/The-Golang-Standard-Library-by-Example)
 
+### 47.1 IO
+
 ### 47.1 fmt包
 
 #### 向外输出
@@ -301,6 +303,8 @@ func Sscanf(str string, format string, a ...interface{}) (n int, err error)
 ```
 
 
+
+### 47.2 文本
 
 
 
@@ -918,6 +922,12 @@ $ go install golang.org/x/pkgsite/cmd/pkgsite@latest
 $ cd myproject
 $ pkgsite 
 ```
+
+
+
+#### `go bug`
+
+跳转到go的GitHub页面，报告bug
 
 
 
