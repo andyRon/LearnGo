@@ -62,13 +62,13 @@ func main() {
 }
 
 func buffer() {
-	a := bytes.NewBufferString("Hello World")
-	b := bytes.NewBuffer([]byte("Hello World"))
-	c := bytes.Buffer{}
-
-	fmt.Println(a)
-	fmt.Println(b)
-	fmt.Println(c)
+	//a := bytes.NewBufferString("Hello World")
+	//b := bytes.NewBuffer([]byte("Hello World"))
+	//c := bytes.Buffer{}
+	//
+	//fmt.Println(a)
+	//fmt.Println(b)
+	//fmt.Println(c)
 
 	a := bytes.NewBufferString("Good Night")
 
