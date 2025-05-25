@@ -310,7 +310,77 @@ func Sscanf(str string, format string, a ...interface{}) (n int, err error)
 
 
 
-### 47.2 time包
+### 47.3 数据结构与算法
+
+#### 排序
+
+包`sort`
+
+```go
+Len()
+Less
+Reverse
+Swap
+
+Sort()
+IsSorted()
+Search()
+// sort包原生支持[]int、[]float64 和[]string 三种内建数据类型切片的排序操作
+IntSlice
+Float64Slice
+StringSlice
+
+func Float64s(a []float64)  
+func Float64sAreSorted(a []float64) bool
+func SearchFloat64s(a []float64, x float64) int
+
+func Strings(a []string)
+func StringsAreSorted(a []string) bool
+func SearchStrings(a []string, x string) int
+```
+
+
+
+`[]interface` 排序与查找
+
+```go
+func Slice(slice interface{}, less func(i, j int) bool) 
+func SliceStable(slice interface{}, less func(i, j int) bool) 
+func SliceIsSorted(slice interface{}, less func(i, j int) bool) bool 
+func Search(n int, f func(int) bool) int
+```
+
+
+
+#### 容器
+
+包`container`
+
+
+
+### 47.4 日期和时间
+
+Go 语言通过标准库 `time` 包处理日期和时间相关的问题。
+
+`time` 包提供了时间的显示和计量用的功能。日历的计算采用的是公历。提供的主要类型：
+
+- `Location`，代表一个地区，并表示该地区所在的时区（可能多个）。`Location` 通常代表地理位置的偏移，比如 CEST 和 CET 表示中欧。
+
+- `Time`，代表一个纳秒精度的时间点，是公历时间。
+
+- `Duration`，代表两个时间点之间经过的时间，以纳秒为单位。可表示的最长时间段大约 290 年，也就是说如果两个时间点相差超过 290 年，会返回 290 年，也就是 minDuration(-1 << 63) 或 maxDuration(1 << 63 - 1)。
+
+  类型定义：`type Duration int64`。
+
+  将 `Duration` 类型直接输出时，因为实现了 `fmt.Stringer` 接口，会输出人类友好的可读形式，如：72h3m0.5s。
+
+- `Timer` 和 `Ticker`，定时器相关类型
+
+- `Weekday` 和 `Month`，原始类型都是 int，实现 `fmt.Stringer` 接口，方便输出。
+
+  
+
+47.2 time包
 
 ![](images/time.png)
 
@@ -352,6 +422,211 @@ func tickDemo() {
 ##### 时间格式化
 
 Go语言中格式化时间模板不是常见的Y-m-d H:M:S而是使用Go的诞生时间2006年1月2号15点04分（记忆口诀为2006 1 2 3 4）。
+
+### 47.5 基本数学函数
+
+`math`
+
+![](images/image-20250102224620500.png)
+
+
+
+math 包实现的就是数学函数计算。
+
+#### 三角函数 ####
+
+正弦函数，反正弦函数，双曲正弦，反双曲正弦
+
+```go
+- func Sin(x float64) float64
+- func Asin(x float64) float64
+- func Sinh(x float64) float64
+- func Asinh(x float64) float64
+```
+
+一次性返回 sin,cos
+
+- func Sincos(x float64) (sin, cos float64)
+
+余弦函数，反余弦函数，双曲余弦，反双曲余弦
+
+```go
+- func Cos(x float64) float64
+- func Acos(x float64) float64
+- func Cosh(x float64) float64
+- func Acosh(x float64) float64
+```
+
+正切函数，反正切函数，双曲正切，反双曲正切
+
+```go
+- func Tan(x float64) float64
+- func Atan(x float64) float64 和 func Atan2(y, x float64) float64
+- func Tanh(x float64) float64
+- func Atanh(x float64) float64
+```
+
+#### 幂次函数 ####
+
+```go
+- func Cbrt(x float64) float64 // 立方根函数
+- func Pow(x, y float64) float64  // x 的幂函数
+- func Pow10(e int) float64 // 10 根的幂函数
+- func Sqrt(x float64) float64 // 平方根
+- func Log(x float64) float64 // 对数函数
+- func Log10(x float64) float64 // 10 为底的对数函数
+- func Log2(x float64) float64  // 2 为底的对数函数
+- func Log1p(x float64) float64 // log(1 + x)
+- func Logb(x float64) float64 // 相当于 log2(x) 的绝对值
+- func Ilogb(x float64) int // 相当于 log2(x) 的绝对值的整数部分
+- func Exp(x float64) float64 // 指数函数
+- func Exp2(x float64) float64 // 2 为底的指数函数
+- func Expm1(x float64) float64 // Exp(x) - 1
+```
+
+#### 特殊函数 ####
+
+```go
+- func Inf(sign int) float64  // 正无穷
+- func IsInf(f float64, sign int) bool // 是否正无穷
+- func NaN() float64 // 无穷值
+- func IsNaN(f float64) (is bool) // 是否是无穷值
+- func Hypot(p, q float64) float64 // 计算直角三角形的斜边长
+```
+
+#### 类型转化函数 ####
+
+```go
+- func Float32bits(f float32) uint32  // float32 和 unit32 的转换
+- func Float32frombits(b uint32) float32 // uint32 和 float32 的转换
+- func Float64bits(f float64) uint64 // float64 和 uint64 的转换
+- func Float64frombits(b uint64) float64 // uint64 和 float64 的转换
+```
+
+#### 其他函数 ####
+
+```go
+- func Abs(x float64) float64 // 绝对值函数
+- func Ceil(x float64) float64  // 向上取整
+- func Floor(x float64) float64 // 向下取整
+- func Mod(x, y float64) float64 // 取模
+- func Modf(f float64) (int float64, frac float64) // 分解 f，以得到 f 的整数和小数部分
+- func Frexp(f float64) (frac float64, exp int) // 分解 f，得到 f 的位数和指数
+- func Max(x, y float64) float64  // 取大值
+- func Min(x, y float64) float64  // 取小值
+- func Dim(x, y float64) float64 // 复数的维数
+- func J0(x float64) float64  // 0 阶贝塞尔函数
+- func J1(x float64) float64  // 1 阶贝塞尔函数
+- func Jn(n int, x float64) float64 // n 阶贝塞尔函数
+- func Y0(x float64) float64  // 第二类贝塞尔函数 0 阶
+- func Y1(x float64) float64  // 第二类贝塞尔函数 1 阶
+- func Yn(n int, x float64) float64 // 第二类贝塞尔函数 n 阶
+- func Erf(x float64) float64 // 误差函数
+- func Erfc(x float64) float64 // 余补误差函数
+- func Copysign(x, y float64) float64 // 以 y 的符号返回 x 值
+- func Signbit(x float64) bool // 获取 x 的符号
+- func Gamma(x float64) float64 // 伽玛函数
+- func Lgamma(x float64) (lgamma float64, sign int) // 伽玛函数的自然对数
+- func Ldexp(frac float64, exp int) float64 // value 乘以 2 的 exp 次幂
+- func Nextafter(x, y float64) (r float64) // 返回参数 x 在参数 y 方向上可以表示的最接近的数值，若 x 等于 y，则返回 x
+- func Nextafter32(x, y float32) (r float32) // 返回参数 x 在参数 y 方向上可以表示的最接近的数值，若 x 等于 y，则返回 x
+- func Remainder(x, y float64) float64 // 取余运算
+- func Trunc(x float64) float64 // 截取函数
+```
+
+### 47.6 文件系统
+
+Go 的标准库提供了很多工具，可以处理文件系统中的文件、构造和解析文件名等。
+
+处理文件的第一步是确定要处理的文件的名字。Go 将文件名表示为简单的字符串，提供了 `path`、`filepath` 等库来操作文件名或路径。用 `os` 中 `File` 结构的 `Readdir` 可以列出一个目录中的内容。
+
+可以用 `os.Stat` 或 `os.Lstat` 来检查文件的一些特性，如权限、大小等。
+
+有时需要创建草稿文件来保存临时数据，或将数据移动到一个永久位置之前需要临时文件存储，`os.TempDir` 可以返回默认的临时目录，用于存放临时文件。关于临时文件，在 `ioutil` 中已经讲解了。
+
+`os` 包还包含了很多其他文件系统相关的操作，比如创建目录、重命名、移动文件等等。
+
+> `os` 包中还有关于进程相关知识。
+
+#### `os` — 平台无关的操作系统功能实现
+
+`os` 包提供了平台无关的操作系统功能接口。尽管错误处理是 go 风格的，但设计是 Unix 风格的；所以，失败的调用会返回 `error` 而非错误码。通常 `error` 里会包含更多信息。例如，如果使用一个文件名的调用（如 Open、Stat）失败了，打印错误时会包含该文件名，错误类型将为 `*PathError`，其内部可以解包获得更多信息。
+
+os 包规定为所有操作系统实现的接口都是一致的。有一些某个系统特定的功能，需要使用 `syscall` 获取。实际上，`os` 依赖于 `syscall`。在实际编程中，我们应该总是优先使用 `os` 中提供的功能，而不是 `syscall`。
+
+
+
+#### `path/filepath` — 兼容操作系统的文件路径操作
+
+##### 解析路径名字符串
+
+
+
+##### 相对路径和绝对路径
+
+
+
+##### 路径的切分和拼接
+
+
+
+##### 规整化路径
+
+
+
+##### 符号链接指向的路径名
+
+
+
+##### 文件路径匹配
+
+
+
+##### 遍历目录
+
+
+
+##### Windows 起作用的函数
+
+
+
+##### 关于 path 包
+
+
+
+#### io/fs — 抽象文件系统
+
+Go 语言从 1.16 开始增加了 io/fs 包，该包定义了一个文件系统需要的相关基础接口，因此我们称之为抽象文件系统。该文件系统是层级文件系统或叫树形文件系统，Unix 文件系统就是这种类型。
+
+
+
+### 47.7 数据持久存储与交换
+
+现代程序离不开数据存储，现阶段很热的所谓大数据处理、云盘等，更是以存储为依托。有数据存储，自然需要进行数据交换，已达到数据共享等目的。
+
+关系型数据库发展了很长一段时间，SQL/SQL-like 已经很成熟，使用也很广泛，Go 语言标准库提供了对 SQL/SQL-like 数据库的操作的标准接口，即 [database/sql](http://docs.studygolang.com/pkg/database/sql) 包。
+
+在数据交换方面，有很多成熟的协议可以使用，常用的有：JSON、XML 等，似乎 Java 社区更喜欢 XML，而目前似乎使用更多的是 JSON。在交换协议选择方面，考虑的主要这几个方面因素：性能、跨语言（通用性）、传输量等。因此，对于性能要求高的场景，会使用 protobuf、msgpack 之类的协议。由于 JSON 和 XML 使用很广泛，Go 语言提供了解析它们的标准库；同时，为了方便 Go 程序直接数据交换，Go 专门提供了 [gob](http://docs.studygolang.com/pkg/) 这种交换协议。
+
+#### `database/sql` — SQL/SQL-Like 数据库操作接口
+
+
+
+
+
+#### `encoding/csv` — 逗号分隔值文件
+
+
+
+### 47.8 数据压缩与归档
+
+
+
+
+
+
+
+---
 
 
 
@@ -572,9 +847,9 @@ Format类函数主要的功能是将其他类型格式化成字符串。
 
 
 
-### 47.7 math包
 
-![](images/image-20250102224620500.png)
+
+
 
 ### 47.8 随机数
 
