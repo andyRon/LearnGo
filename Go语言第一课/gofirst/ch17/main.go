@@ -11,8 +11,7 @@ func main() {
 	fmt.Println(unsafe.Sizeof(t))      // 结构体类型变量占用的内存大小
 	fmt.Println(unsafe.Offsetof(t.Fn)) // 字段Fn在内存中相对于变量t起始地址的偏移量
 	fmt.Println(unsafe.Sizeof(t.F1.b))
-	fmt.Println(unsafe.Sizeof(t.F1.u))
-
+	fmt.Println(unsafe.Sizeof(t.F1.b))
 }
 
 type T struct {
