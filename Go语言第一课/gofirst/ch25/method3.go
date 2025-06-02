@@ -14,7 +14,7 @@ func (*T) M3() {}
 func (*T) M4() {}
 
 // 查看一个非接口类型的方法集合
-func dumpMethodSet(i interface{}) {
+func dumpMethodSet(i interface{}) { // TODO
 	dynTyp := reflect.TypeOf(i)
 
 	if dynTyp == nil {
@@ -34,6 +34,7 @@ func dumpMethodSet(i interface{}) {
 	}
 	fmt.Printf("\n")
 }
+
 func main() {
 	var n int
 	dumpMethodSet(n)
