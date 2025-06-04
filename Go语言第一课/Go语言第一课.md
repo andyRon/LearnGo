@@ -5381,7 +5381,7 @@ func doSomething() error {
 
 Go语言引入defer的初衷，就是解决这些问题。defer具体的运作机制是怎样的呢？
 
-defer是Go语言提供的一种延迟调用机制，defer的运作离不开函数。
+defer是Go语言提供的一种==延迟调用机制==，defer的运作离不开函数。
 
 - 在Go中，只有在函数（和方法）内部才能使用defer；
 - defer关键字后面只能接函数（或方法），这些函数被称为**deferred函数**。defer将它们注册到其所在Goroutine中，用于存放deferred函数的栈数据结构中，这些deferred函数将在执行defer的函数退出前，按后进先出（LIFO）的顺序被程序调度执行。
@@ -5461,7 +5461,7 @@ defer不仅可以用来**捕捉和恢复panic**，还能让函数变得**更简�
 
 牢记：**defer关键字后面的表达式，是在将deferred函数注册到deferred函数栈的时候进行求值的**。
 
-
+🔖
 
 #### 第三点：知晓defer带来的性能损耗
 
@@ -6262,6 +6262,8 @@ exit:  main
 
 程序按main -> foo -> bar的函数调用次序执行，代码在函数的入口与出口处分别输出了跟踪日志。
 
+分析代码：每个函数的入口处都使用defer设置了一个deferred函数。根据第23讲中讲解的defer的运作机制，**Go会在defer设置deferred函数时对defer后面的表达式进行求值**。foo函数中的defer Trace("foo")()这行代码为例，Go会对defer后面的表达式Trace("foo")()进行求值。由于这个表达式包含一个函数调用Trace("foo")，所以这个函数会被执行。
+
 不足之处：
 
 - 调用Trace时需手动显式传入要跟踪的函数名；
@@ -6273,27 +6275,188 @@ exit:  main
 
 ### 27.2 自动获取所跟踪函数的函数名
 
+```go
+package main
+
+import "runtime"
+
+func main() {
+	defer Trace()()
+	foo()
+}
+
+func Trace() func() {
+	// runtime.Caller函数获得当前Goroutine的函数调用栈上的信息
+	// runtime.Caller的参数标识的是要获取的是哪一个栈帧的信息
+	// 0表示返回的是Caller函数的调用者的函数信息，在这里就是Trace函数。1是Trace函数的调用者的信息。
+	// 四个返回值分别是：程序计数（pc）；函数所在的源文件名以及所在行数；是否能成功获取这些信息；
+	pc, _, _, ok := runtime.Caller(1)
+	if !ok {
+		panic("not found caller")
+	}
+
+	fn := runtime.FuncForPC(pc) // 被跟踪函数的函数名称
+	name := fn.Name()
+
+	println("enter: ", name)
+	return func() {
+		println("exit: ", name)
+	}
+}
+
+func foo() {
+	defer Trace()()
+	bar()
+}
+func bar() {
+	defer Trace()()
+}
+```
 
 
-### 27.3 增加Goroutine标识 🔖
 
+### 27.3 增加Goroutine标识
 
+上面的Trace函数在面对只有一个Goroutine的时候，还是可以支撑的，但当程序中并发运行多个Goroutine的时候，多个函数调用链的出入口信息输出就会混杂在一起，无法分辨。
 
-### 27.4 让输出的跟踪信息更具层次感 🔖
+改造方式：**在输出的函数出入口信息时，带上一个在程序每次执行时能唯一区分Goroutine的Goroutine ID。**
+
+> Go核心团队为了避免Goroutine ID的滥用，故意没有将Goroutine ID暴露给开发者。
+>
+> Go标准库的`net/http/h2_bundle.go`有获得Goroutine ID方法，但不是到处方法，可以自己复制出来改造一下。
+
+🔖
+
+### 27.4 让输出的跟踪信息更具层次感
 
 对于程序员来说，缩进是最能体现出“层次感”的方法。
 
+ 🔖
 
 
-### 27.5 利用代码生成自动注入Trace函数 🔖
+
+### 27.5 利用代码生成自动注入Trace函数 
 
 #### 将Trace函数放入一个独立的module中
 
+最新版的trace.go放入到该目录下，将包名改为trace，并仅保留Trace函数、Trace使用的函数以及包级变量，其他函数一律删除掉。
+
+在Go中，通常我们会用一个example_test.go文件来编写使用trace包的演示代码:
+
+```go
+// instrument_trace/example_test.go
+package trace_test
+
+import (
+	. "github.com/andyron/gofirst/instrument_trace"
+)
+
+func a() {
+	defer Trace()()
+	b()
+}
+
+func b() {
+	defer Trace()()
+	c()
+}
+
+func c() {
+	defer Trace()()
+	d()
+}
+
+func d() {
+	defer Trace()()
+}
+
+func ExampleTrace() {
+	a()
+	// Output:
+	// g[00001]:    ->github.com/andyron/gofirst/instrument_trace_test.a
+	// g[00001]:        ->github.com/andyron/gofirst/instrument_trace_test.b
+	// g[00001]:            ->github.com/andyron/gofirst/instrument_trace_test.c
+	// g[00001]:                ->github.com/andyron/gofirst/instrument_trace_test.d
+	// g[00001]:                <-github.com/andyron/gofirst/instrument_trace_test.d
+	// g[00001]:            <-github.com/andyron/gofirst/instrument_trace_test.c
+	// g[00001]:        <-github.com/andyron/gofirst/instrument_trace_test.b
+	// g[00001]:    <-github.com/andyron/gofirst/instrument_trace_test.a
+}
+```
+
+在example_test.go文件中，我们用ExampleXXX形式的函数表示一个示例，go test命令会扫描example_test.go中的以Example为前缀的函数并执行这些函数。
+
+每个ExampleXXX函数需要包含预期的输出，就像上面ExampleTrace函数尾部那样，我们在一大段注释中提供这个函数执行后的预期输出，预期输出的内容从`// Output:`的下一行开始。go test会将ExampleTrace的输出与预期输出对比，如果不一致，会报测试错误。从这一点，我们可以看出example_test.go也是trace包单元测试的一部分。
+
+正确：
+
+```sh
+$ go test
+PASS
+ok      github.com/andyron/gofirst/instrument_trace     0.401s
+```
+
+输出与给出的结果不同：
+
+```sh
+$ go test
+--- FAIL: ExampleTrace (0.00s)
+got:
+g[00001]:    ->github.com/andyron/gofirst/instrument_trace_test.a
+g[00001]:        ->github.com/andyron/gofirst/instrument_trace_test.b
+g[00001]:            ->github.com/andyron/gofirst/instrument_trace_test.c
+g[00001]:                ->github.com/andyron/gofirst/instrument_trace_test.d
+g[00001]:                <-github.com/andyron/gofirst/instrument_trace_test.d
+g[00001]:            <-github.com/andyron/gofirst/instrument_trace_test.c
+g[00001]:        <-github.com/andyron/gofirst/instrument_trace_test.b
+g[00001]:    <-github.com/andyron/gofirst/instrument_trace_test.a
+want:
+g[00001]:    ->github.com/andyron/gofirst/instrument_trace_test.ass
+g[00001]:        ->github.com/andyron/gofirst/instrument_trace_test.b
+g[00001]:            ->github.com/andyron/gofirst/instrument_trace_test.c
+g[00001]:                ->github.com/andyron/gofirst/instrument_trace_test.d
+g[00001]:                <-github.com/andyron/gofirst/instrument_trace_test.d
+g[00001]:            <-github.com/andyron/gofirst/instrument_trace_test.c
+g[00001]:        <-github.com/andyron/gofirst/instrument_trace_test.b
+g[00001]:    <-github.com/andyron/gofirst/instrument_trace_test.a
+FAIL
+exit status 1
+FAIL    github.com/andyron/gofirst/instrument_trace     0.437s
+```
+
+
+
 #### 自动注入Trace函数
+
+
+
+```sh
+$ tree ./instrument_trace -F
+./instrument_trace
+├── Makefile
+├── cmd/
+│   └── instrument/
+│       └── main.go  # instrument命令行工具的main包
+├── example_test.go
+├── go.mod
+├── go.sum
+├── instrumenter/    # 自动注入逻辑的相关结构
+│   ├── ast/
+│   │   └── ast.go
+│   └── instrumenter.go
+└── trace.go
+```
+
+
+
+🔖🔖
 
 #### 利用instrument工具注入跟踪代码
 
+🔖🔖
 
 
 
+### 小结
 
+目标：实现一个自动注入跟踪代码并输出有层次感的函数调用链跟踪命令行工具。

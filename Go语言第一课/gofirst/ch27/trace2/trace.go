@@ -36,6 +36,7 @@ func Trace() func() {
 
 var goroutineSpace = []byte("goroutine ")
 
+// curGoroutineID 获取当前协程的ID。模仿标准库文件$GOROOT/src/net/http/h2_bundle.go
 func curGoroutineID() uint64 {
 	b := make([]byte, 64)
 	b = b[:runtime.Stack(b, false)]
@@ -84,5 +85,3 @@ func C2() {
 	defer Trace()()
 	D()
 }
-
-
