@@ -1,5 +1,7 @@
 package main
 
+// 类型约束
+
 type C1 interface {
 	~int | ~int32
 	M1()

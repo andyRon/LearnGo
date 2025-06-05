@@ -1,10 +1,10 @@
 package main
 
 import (
-		"testing"
-		"math/rand"
-		"sort"
-		"golang.org/x/exp/slices"
+	"golang.org/x/exp/slices"
+	"math/rand"
+	"sort"
+	"testing"
 )
 
 const N = 100_000
@@ -20,6 +20,7 @@ func makeRandomInts(n int) []int {
 	return ints
 }
 
+// Go标准库sort包（非泛型版）的Ints函数
 func BenchmarkSortInts(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
@@ -30,6 +31,7 @@ func BenchmarkSortInts(b *testing.B) {
 	}
 }
 
+// Go团队维护golang.org/x/exp/slices中的泛型版Sort函数；
 func BenchmarkSlicesSort(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
@@ -40,6 +42,7 @@ func BenchmarkSlicesSort(b *testing.B) {
 	}
 }
 
+// 对golang.org/x/exp/slices中的泛型版Sort函数进行改造得到的、仅针对[]int进行排序的Sort函数。
 func BenchmarkIntSort(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {

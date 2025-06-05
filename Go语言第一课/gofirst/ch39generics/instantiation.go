@@ -1,5 +1,7 @@
 package main
 
+// 类型具化（instantiation）
+
 func Sort[Elem interface{ Less(y Elem) bool }](list []Elem) {
 }
 
