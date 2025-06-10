@@ -3398,49 +3398,94 @@ func main() {
 
 # 补充
 
-## 43 如何拉取私有的Go Module？🔖
+## 43 如何拉取私有的Go Module？
 
 ### 43.1 导入本地module
 
 彻底抛弃Gopath构建模式，全面拥抱Go Module构建模式。
 
 > **如果我们的项目依赖的是本地正在开发、尚未发布到公共站点上的Go Module，那么我们应该如何做呢？**
+>
+> 假设你有一个项目，这个项目中的module a依赖module b，而module b是你另外一个项目中的module，它本来是要发布到github.com/user/b上的。
+> 但此时此刻，module b还没有发布到公共托管站点上，它源码还在你的开发机器上。也就是说，go命令无法在github.com/user/b上找到并拉取module a的依赖module b，这时，如果你针对module a所在项目使用go mod tidy命令，就会收到类似下面这样的报错信息：
+>
+> ```sh
+> $go mod tidy
+> go: finding module for package github.com/user/b
+> github.com/user/a imports
+>     github.com/user/b: cannot find module providing package github.com/user/b: module github.com/user/b: reading https://goproxy.io/github.com/user/b/@v/list: 404 Not Found
+>     server response:
+>     not found: github.com/user/b@latest: terminal prompts disabled
+>     Confirm the import path was entered correctly.
+>     If this is a private repository, see https://golang.org/doc/faq#git_https for additional information.
+> ```
+>
+> 
 
 Go 1.18之前:**go.mod的replace指示符**
+
+Go 1.18之后，Go工作区（Go workspace，也译作Go工作空间），go.work  🔖
 
 
 
 ### 43.2 拉取私有module的需求与参考方案
 
+配置一个高效好用的公共GOPROXY服务，就可以轻松拉取所有公共Go Module了：
+
 ![](images/06be396d9cce45cf8db37119c429cf35.jpg)
 
+但随着公司内Go使用者和Go项目的增多，“重造轮子”的问题就出现了。抽取公共代码放入一个独立的、可被复用的内部私有仓库成为了必然，这样我们就**有了拉取私有Go Module的需求。**
 
-
-
+一些公司或组织的所有代码，都放在公共vcs托管服务商那里（比如github.com），私有Go Module则直接放在对应的公共vcs服务的private repository（私有仓库）中。如果你的公司也是这样，那么拉取托管在公共vcs私有仓库中的私有Go Module，也很容易，见下图：
 
 
 
 ![](images/a6583e4e450b48678796b6f1a6b2bba5.jpg)
 
-- 第一个方案是通过直连组织公司内部的私有Go Module服务器拉取。
+也就是说，只要我们在每个开发机上，配置公共GOPROXY服务拉取公共Go Module，同时再把私有仓库配置到GOPRIVATE环境变量，就可以了。这样，所有私有module的拉取，都会直连代码托管服务器，不会走GOPROXY代理服务，也**不会去GOSUMDB服务器做Go包的hash值校验**。
+
+当然，这个方案有一个前提，那就是每个开发人员都需要具有访问公共vcs服务上的私有Go Module仓库的**权限**，凭证的形式不限，可以是basic auth的user和password，也可以是personal access token（类似GitHub那种），只要按照公共vcs的身份认证要求提供就可以了。
+
+不过，更多的公司/组织，可能会将私有Go Module放在公司/组织内部的vcs（代码版本控制）服务器上，就像下面图中所示：
+
+![](images/14e770a0871843ab8adcf198ee9c8064.jpg)
+
+这种情况，让Go命令，自动拉取内部服务器上的私有Go Module有两个参考方案：
+
+
+
+#### 第一个方案是通过直连组织公司内部的私有Go Module服务器拉取。
 
 ![](images/75d9ee7bfd434a96be8d6ff3e034af77.jpg)
 
+这个方案，公司内部会搭建一个**内部goproxy服务**（in-house goproxy）。这样做有两个目的，
 
+- 一是为那些无法直接访问外网的开发机器，以及ci机器提供拉取外部Go Module的途径，
+- 二来，由于in-house goproxy的cache的存在，这样做还可以加速公共Go Module的拉取效率。
 
-- 第二种方案，是将外部Go Module与私有Go Module都交给内部统一的GOPROXY服务去处理：
+另外，对于私有Go Module，开发机只需要将它配置到GOPRIVATE环境变量中就可以了，这样，Go命令在拉取私有Go Module时，就不会再走GOPROXY，而会采用直接访问vcs（如上图中的git.yourcompany.com）的方式拉取私有Go Module。
+
+这个方案十分适合内部**有完备IT基础设施的公司**。这类型的公司内部的vcs服务器都可以通过域名访问（比如git.yourcompany.com/user/repo），因此，公司内部员工可以像访问公共vcs服务那样，访问内部vcs服务器上的私有Go Module。
+
+#### 第二种方案，是将外部Go Module与私有Go Module都交给内部统一的GOPROXY服务去处理：
 
 ![](images/7d834252238e4101adc7f49be4ec8fb5.jpg)
 
+在这种方案中，开发者只需要把GOPROXY配置为in-house goproxy，就可以统一拉取外部Go Module与私有Go Module。
 
+但由于go命令默认会对所有通过goproxy拉取的Go Module，进行sum校验（默认到sum.golang.org)，而我们的私有Go Module在公共sum验证server中又没有数据记录。因此，开发者需要将私有Go Module填到GONOSUMDB环境变量中，这样，go命令就不会对其进行sum校验了。
 
+不过这种方案有一处要注意：in-house goproxy需要拥有对所有private module所在repo的访问权限，才能保证每个私有Go Module都拉取成功。
 
+> 推荐第二个方案，这个方案中，我们可以**将所有复杂性都交给in-house goproxy这个节点**，开发人员可以无差别地拉取公共module与私有module，心智负担降到最低。
 
-### 43.3 统一Goproxy方案的实现思路与步骤
+### 43.3 统一Goproxy方案的实现思路与步骤🔖
 
 ![](images/10de4af0a27c4df9b577542da3ebfdca.jpg)
 
 #### 选择一个GOPROXY实现
+
+[Go module proxy协议规范](https://pkg.go.dev/cmd/go@master#hdr-Module_proxy_protocol)发布后，Go社区出现了很多成熟的Goproxy开源实现，比如有最初的[athens](https://github.com/gomods/athens)，还有国内的两个优秀的开源实现：[goproxy.cn](https://github.com/goproxy/goproxy)和[goproxy.io](https://github.com/goproxyio/goproxy)等。其中，goproxy.io在官方站点给出了[企业内部部署的方法](https://goproxy.io/zh/docs/enterprise.html)，所以今天我们就基于goproxy.io来实现我们的方案。
 
 
 
@@ -3579,7 +3624,9 @@ srmm仓库下面有两个Go Module，分为位于子目录module1和module2的�
 
 
 
+### 思考题
 
+> Go Module只有在引入不兼容的change时才会升级major版本号，那么哪些change属于不兼容的change呢？如何更好更快地识别出这些不兼容change呢？
 
 
 
@@ -3789,7 +3836,7 @@ Go是带有垃圾回收的编程语言，指针在Go中依旧位于C位，它的
 
 指针无论是在Go中，还是在其他支持指针的编程语言中，存在的意义就是为了是**“==可改变==”**。在Go中，我们使用`*T`类型的变量调用方法、以`*T`类型作为函数或方法的形式参数、返回`*T`类型的返回值等的目的，也都是因为指针可以改变其指向的内存单元的值。
 
-当然，指针的好处，还包括它传递的开销是**常数级**的（在x86-64平台上仅仅是8字节的拷贝），**可控可预测**。无论指针指向的是一个字节大小的变量，还是一个拥有10000个元素的[10000]int型数组，传递指针的开销都是一样的。
+当然，指针的好处，还包括它传递的开销是**常数级**的（在x86-64平台上仅仅是8字节的拷贝），**可控可预测**。无论指针指向的是一个字节大小的变量，还是一个拥有10000个元素的[10000]int型数组，**传递指针的开销都是一样的**。
 
 不过，虽然Go在语法层面上保留了指针，但Go语言的目标之一是成为一门**安全**的编程语言，因此，它对指针的使用做了一定的限制，包括这两方面：
 
@@ -3851,13 +3898,13 @@ func main() {
 
 ## 46 Go语言的GC实现
 
-依赖人去处理复杂的对象内存管理的问题是不科学、不合理的。C 和 C++ 程序员已经被折磨了数十年，我们不应该再重蹈覆辙了，于是，后来的很多编程语言就用上垃圾回收（GC）机制。
+依赖人去处理复杂的对象内存管理的问题是不科学、不合理的。C和C++程序员已经被折磨了数十年，我们不应该再重蹈覆辙了，于是，后来的很多编程语言就用上垃圾回收（GC）机制。
 
 ### 46.1 GC拯救程序员
 
-垃圾回收（Garbage Collection）也被称为自动内存管理技术，在现代编程语言中使用得相当广泛，常见的 Java、Go、C# 均在语言的 runtime 中集成了相应的实现。
+垃圾回收（Garbage Collection）也被称为**自动内存管理技术**，在现代编程语言中使用得相当广泛，常见的 Java、Go、C# 均在语言的 runtime 中集成了相应的实现。
 
-在传统的不带GC的编程语言中，我们需要关注对象的分配位置，要自己去选择对象是分配在堆还是栈上，但在 Go 这门有 GC 的语言中，集成了逃逸分析功能来帮助我们自动判断对象应该在堆上还是栈上，我们可以使用 `go build -gcflags="-m"` 来观察逃逸分析的结果：
+在传统的不带GC的编程语言中，我们需要关注对象的分配位置，要自己去选择对象是分配在堆还是栈上，但在 Go 这门有 GC 的语言中，集成了**逃逸分析**功能来帮助我们自动判断对象应该在堆上还是栈上，我们可以使用 `go build -gcflags="-m"` 来观察逃逸分析的结果：
 
 ```go
 package main
@@ -3877,7 +3924,7 @@ $ go build -gcflags="-m" escape.go
 ./escape.go:4:14: make([]int, 10240) escapes to heap
 ```
 
-若对象被分配在栈上，它的管理成本就比较低，通过挪动栈顶寄存器就可以实现对象的分配和释放。若对象被分配在堆上，就要经历层层的内存申请过程。但这些流程对用户都是透明的，在编写代码时我们并不需要在意它。只有需要优化时，我们才需要研究具体的逃逸分析规则。
+若对象被分配在栈上，它的管理成本就比较低，通过挪动栈顶寄存器就可以实现**对象的分配和释放**。若对象被分配在堆上，就要经历层层的内存申请过程。但这些流程对用户都是透明的，在编写代码时我们并不需要在意它。只有需要优化时，才需要研究具体的逃逸分析规则。
 
 逃逸分析与垃圾回收结合在一起，极大地解放了程序员们的心智，我们在编写代码时，似乎再也没必要去担心内存的分配和释放问题了。
 
@@ -3973,7 +4020,7 @@ large 内存分配稍微特殊一些，没有前面这两类这样复杂的缓�
 
 ### 46.4 垃圾回收
 
-Go 语言使用了**并发标记与清扫算法**作为它的 GC 实现。
+Go语言使用了**并发标记与清扫算法**作为它的 GC 实现。
 
 标记、清扫算法是一种古老的 GC 算法，是指将内存中正在使用的对象进行标记，之后清扫掉那些未被标记的对象的一种垃圾回收算法。并发标记与清扫重点在**并发**，是指垃圾回收的**标记和清扫过程能够与应用代码并发执行**。但并发标记清扫算法的一大缺陷是无法解决==内存碎片==问题，而 tcmalloc 恰好一定程度上缓解了内存碎片问题，两者配合使用相得益彰。
 
