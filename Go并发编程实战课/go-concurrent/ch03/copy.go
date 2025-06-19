@@ -23,4 +23,5 @@ func foo(c Counter) {
 	c.Lock()
 	defer c.Unlock()
 	fmt.Println("in foo")
+
 }

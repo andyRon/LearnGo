@@ -31,7 +31,7 @@ type Counter2 struct {
 	CounterType int
 	name        string
 
-	mu    sync.Mutex
+	mu    sync.Mutex // 如果嵌入的struct有多个字段，我们一般会把Mutex放在要控制的字段上面，然后使用空格把字段分隔开来。
 	count uint64
 }
 
