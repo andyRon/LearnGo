@@ -3864,31 +3864,73 @@ Go官方文档里专门介绍了Go的内存模型，你不要误解这里的内�
 
 ## 16 Semaphore：一篇文章搞懂信号量
 
-### 信号量是什么？都有什么操作？
+### 16.1 信号量是什么？都有什么操作？
 
 信号量的概念是荷兰计算机科学家Edsger Dijkstra在1963年左右提出来的，广泛应用在不同的操作系统中。在系统中，会给每一个进程一个信号量，代表每个进程目前的状态。未得到控制权的进程，会在特定的地方被迫停下来，等待可以继续进行的信号到来。
 
 最简单的信号量就是一个变量加一些并发控制的能力，这个变量是0到n之间的一个数值。当goroutine完成对此信号量的等待（wait）时，该计数值就减1，当goroutine完成对此信号量的释放（release）时，该计数值就加1。当计数值为0的时候，goroutine调用wait等待该信号量是不会成功的，除非计数器又大于0，等待的goroutine才有可能成功返回。
 
+简单的信号量就是一个变量加一些并发控制的能力，这个变量是0到n之间的一个数值。当goroutine完成对此信号量的等待（wait）时，该计数值就减1，当goroutine完成对此信号量的释放（release）时，该计数值就加1。当计数值为0的时候，goroutine调用wait等待该信号量是不会成功的，除非计数器又大于0，等待的goroutine才有可能成功返回。
+
+更复杂的信号量类型，就是使用抽象数据类型代替变量，用来代表复杂的资源类型。实际上，大部分的信号量都使用一个整型变量来表示一组资源，并没有实现太复杂的抽象数据类型，所以只要知道有更复杂的信号量就行了。
+
+生活中的例子，进一步理解信号量。
+
+图书馆新购买了10本《Go并发编程的独家秘籍》，有1万个学生都想读这本书，“僧多粥少”。所以，图书馆管理员先会让这1万个同学进行登记，按照登记的顺序，借阅此书。如果书全部被借走，那么，其他想看此书的同学就需要等待，如果有人还书了，图书馆管理员就会通知下一位同学来借阅这本书。这里的资源是《Go并发编程的独家秘籍》这十本书，想读此书的同学就是goroutine，图书管理员就是信号量。
 
 
-### P/V操作
+
+### 16.2 P/V操作
 
 Dijkstra在他的论文中为信号量定义了两个操作P和V。P操作（descrease、wait、acquire）是减少信号量的计数值，而V操作（increase、signal、release）是增加信号量的计数值。
 
+使用伪代码表示如下（中括号代表原子操作）：
 
+```go
+function V(semaphore S, integer I):
+    [S ← S + I]
+
+function P(semaphore S, integer I):
+    repeat:
+        [if S ≥ I:
+        S ← S − I
+        break]
+```
+
+可以看到，初始化信号量 S 有一个指定数量（**n**）的资源，它就像是一个有 n 个资源的池子。P 操作相当于请求资源，如果资源可用，就立即返回；如果没有资源或者不够，那么，它可以不断尝试或者阻塞等待。V 操作会释放自己持有的资源，把资源返还给信号量。信号量的值除了初始化的操作以外，只能由 P/V 操作改变。
+
+总结下信号量的实现。
 
 - 初始化信号量：设定初始的资源的数量。
 - P操作：将信号量的计数值减去1，如果新值已经为负，那么调用者会被阻塞并加入到等待队列中。否则，调用者会继续执行，并且获得一个资源。
 - V操作：将信号量的计数值加1，如果先前的计数值为负，就说明有等待的P操作的调用者。它会从等待队列中取出一个等待的调用者，唤醒它，让它继续执行。
 
+🔖
 
 
 
+### 16.3 Go官方扩展库的实现
 
-### Go官方扩展库的实现
+在运行时，Go 内部使用信号量来控制 goroutine 的阻塞和唤醒。我们在学习基本并发原语的实现时也看到了，比如互斥锁的第二个字段：
 
-并不叫Semaphore，而是叫Weighted。
+```go
+type Mutex struct {
+    state int32
+    sema  uint32
+}
+```
+
+信号量的 P/V 操作是通过函数实现的：
+
+```go
+func runtime_Semacquire(s *uint32)
+func runtime_SemacquireMutex(s *uint32, lifo bool, skipframes int)
+func runtime_Semrelease(s *uint32, handoff bool, skipframes int)
+```
+
+遗憾的是，它是 Go 运行时内部使用的，并没有封装暴露成一个对外的信号量并发原语，原则上我们没有办法使用。不过没关系，Go 在它的扩展包中提供了信号量semaphore，不过这个信号量的类型名并不叫 `Semaphore`，而是叫 `Weighted`。
+
+之所以叫做 Weighted，应该是因为可以在初始化创建这个信号量的时候设置权重（初始化的资源数），其实我觉得叫 Semaphore 或许会更好。
 
 ```go
 func NewWeighted(n int64) *Weighted {
@@ -3907,7 +3949,9 @@ func (s *Weighted) Release(n int64) {
 
 如果在实际应用中，你想等所有的Worker都执行完，就可以获取最大计数值的信号量。
 
-### 使用信号量的常见错误
+
+
+### 16.4 使用信号量的常见错误
 
 - 请求了资源，但是忘记释放它；
 - 释放了从未请求的资源；
@@ -3916,23 +3960,53 @@ func (s *Weighted) Release(n int64) {
 
 
 
-### 其它信号量的实现
+### 16.5 其它信号量的实现
 
 使用Channel来实现
 
 
 
+```go
+  // Semaphore 数据结构，并且还实现了Locker接口
+  type semaphore struct {
+    sync.Locker
+    ch chan struct{}
+  }
+  
+  // 创建一个新的信号量
+  func NewSemaphore(capacity int) sync.Locker {
+    if capacity <= 0 {
+      capacity = 1 // 容量为1就变成了一个互斥锁
+    }
+    return &semaphore{ch: make(chan struct{}, capacity)}
+  }
+  
+  // 请求一个资源
+  func (s *semaphore) Lock() {
+    s.ch <- struct{}{}
+  }
+  
+  // 释放资源
+  func (s *semaphore) Unlock() {
+    <-s.ch
+  }
+```
 
+
+
+### 总结
 
 ![](images/image-20250221150814734.png)
 
 ### 思考题
 
-1.  你能用Channel实现信号量并发原语吗？你能想到几种实现方式？
+> 你能用Channel实现信号量并发原语吗？你能想到几种实现方式？
 
 
 
-2. 为什么信号量的资源数设计成int64而不是uint64呢？
+
+
+> 为什么信号量的资源数设计成int64而不是uint64呢？
 
 
 
@@ -3955,6 +4029,42 @@ SingleFlight的作用是，在处理多个goroutine同时调用同一个函数�
 其实，sync.Once不是只在并发的时候保证只有一个goroutine执行函数f，而是会保证永远只执行一次，而SingleFlight是每次调用都重新执行，并且在多个请求同时调用的时候只有一个执行。它们两个面对的场景是不同的，sync.Once主要是用在单次初始化场景中，而SingleFlight主要用在合并并发请求的场景中，尤其是缓存场景。
 
 #### 实现原理
+
+SingleFlight 使用互斥锁 Mutex 和 Map 来实现。Mutex 提供并发时的读写保护，Map 用来保存同一个 key 的正在处理（in flight）的请求。
+
+SingleFlight 的数据结构是 Group，它提供了三个方法。
+
+![](images/image-20250620182323338.png)
+
+1. Do：这个方法执行一个函数，并返回函数执行的结果。你需要提供一个 key，对于同一个 key，在同一时间只有一个在执行，同一个 key 并发的请求会等待。第一个执行的请求返回的结果，就是它的返回结果。函数 fn 是一个无参的函数，返回一个结果或者 error，而 Do 方法会返回函数执行的结果或者是 error，shared 会指示 v 是否返回给多个请求。
+2. DoChan：类似 Do 方法，只不过是返回一个 chan，等 fn 函数执行完，产生了结果以后，就能从这个 chan 中接收这个结果。
+3. Forget：告诉 Group 忘记这个 key。这样一来，之后这个 key 请求会执行 f，而不是等待前一个未完成的 fn 函数的结果。
+
+
+
+```go
+	// 代表一个正在处理的请求，或者已经处理完的请求
+  type call struct {
+    wg sync.WaitGroup
+  
+
+    // 这个字段代表处理完的值，在waitgroup完成之前只会写一次
+        // waitgroup完成之后就读取这个值
+    val interface{}
+    err error
+  
+        // 指示当call在处理时是否要忘掉这个key
+    forgotten bool
+    dups  int
+    chans []chan<- Result
+  }
+  
+    // group代表一个singleflight对象
+  type Group struct {
+    mu sync.Mutex       // protects m
+    m  map[string]*call // lazily initialized
+  }
+```
 
 
 
@@ -3980,15 +4090,68 @@ CyclicBarrier允许一组goroutine彼此等待，到达一个共同的执行点�
 
 #### 实现原理
 
+CyclicBarrier 有两个初始化方法：
+
+1. 第一个是 New 方法，它只需要一个参数，来指定循环栅栏参与者的数量；
+2. 第二个方法是 NewWithAction，它额外提供一个函数，可以在每一次到达执行点的时候执行一次。具体的时间点是在最后一个参与者到达之后，但是其它的参与者还未被放行之前。我们可以利用它，做放行之前的一些共享状态的更新等操作。
+
+```go
+func New(parties int) CyclicBarrier
+func NewWithAction(parties int, barrierAction func() error) CyclicBarrier
+```
+
+
+
+```go
+type CyclicBarrier interface {
+    // 等待所有的参与者到达，如果被ctx.Done()中断，会返回ErrBrokenBarrier
+    Await(ctx context.Context) error
+
+    // 重置循环栅栏到初始化状态。如果当前有等待者，那么它们会返回ErrBrokenBarrier
+    Reset()
+
+    // 返回当前等待者的数量
+    GetNumberWaiting() int
+
+    // 参与者的数量
+    GetParties() int
+
+    // 循环栅栏是否处于中断状态
+    IsBroken() bool
+}
+```
+
+
+
+## 并发趣题：一氧化二氢制造工厂
+
+题目：
+
+> 有一个名叫大自然的搬运工的工厂，生产一种叫做一氧化二氢的神秘液体。这种液体的分子是由一个氧原子和两个氢原子组成的，也就是水。
+
+> 这个工厂有多条生产线，每条生产线负责生产氧原子或者是氢原子，每条生产线由一个 goroutine 负责。
+
+> 这些生产线会通过一个栅栏，只有一个氧原子生产线和两个氢原子生产线都准备好，才能生成出一个水分子，否则所有的生产线都会处于等待状态。也就是说，一个水分子必须由三个不同的生产线提供原子，而且水分子是一个一个按照顺序产生的，每生产一个水分子，就会打印出 HHO、HOH、OHH 三种形式的其中一种。HHH、OOH、OHO、HOO、OOO 都是不允许的。
+
+> 生产线中氢原子的生产线为 2N 条，氧原子的生产线为 N 条。
 
 
 
 
 
+### 总结
 
 
 
 ![](images/image-20250221150956184.png)
+
+
+
+### 思考题
+
+> 如果大自然的搬运工工厂生产的液体是双氧水（双氧水分子是两个氢原子和两个氧原子），你又该怎么实现呢？
+
+
 
 
 
@@ -4000,17 +4163,112 @@ CyclicBarrier允许一组goroutine彼此等待，到达一个共同的执行点�
 
 ### 18.1 ErrGroup
 
+ErrGroup是 Go 官方提供的一个同步扩展库。我们经常会碰到需要将一个通用的父任务拆成几个小任务并发执行的场景，其实，将一个大的任务拆成几个小任务并发执行，可以有效地提高程序的并发度。就像你在厨房做饭一样，你可以在蒸米饭的同时炒几个小菜，米饭蒸好了，菜同时也做好了，很快就能吃到可口的饭菜。
+
+ErrGroup 就是用来应对这种场景的。它和 WaitGroup 有些类似，但是它提供功能更加丰富：
+
+1. 和 Context 集成；
+2. error 向上传播，可以把子任务的错误传递给 Wait 的调用者。
+
 #### 基本用法
+
+golang.org/x/sync/errgroup 包下定义了一个 Group struct，它就是我们要介绍的 ErrGroup 并发原语，底层也是基于 WaitGroup 实现的。
+
+在使用 ErrGroup 时，我们要用到三个方法，分别是 WithContext、Go 和 Wait。
+
+1. **WithContext**
+
+```go
+func WithContext(ctx context.Context) (*Group, context.Context)
+```
+
+
+
+2. Go
+
+```go
+func (g *Group) Go(f func() error)
+```
+
+
+
+3. **Wait**
+
+类似WaitGroup，Group也有Wait方法，等所有的子任务都完成后，它才会返回，否则只会阻塞等待。如果有多个子任务返回错误，它只会返回第一个出现的错误，如果所有的子任务都执行成功，就返回nil：
+
+```
+func (g *Group) Wait() error
+```
 
 
 
 #### ErrGroup使用例子
 
+##### 简单例子：返回第一个错误
+
+在这个例子中，启动了三个子任务，其中，子任务 2 会返回执行失败，其它两个执行成功。在三个子任务都执行后，group.Wait 才会返回第 2 个子任务的错误。
+
+```go
+package main
 
 
-### 其它实用的Group并发原语
+import (
+    "errors"
+    "fmt"
+    "time"
 
-#### SizedGroup/ErrSizedGrou
+    "golang.org/x/sync/errgroup"
+)
+
+func main() {
+    var g errgroup.Group
+
+
+    // 启动第一个子任务,它执行成功
+    g.Go(func() error {
+        time.Sleep(5 * time.Second)
+        fmt.Println("exec #1")
+        return nil
+    })
+    // 启动第二个子任务，它执行失败
+    g.Go(func() error {
+        time.Sleep(10 * time.Second)
+        fmt.Println("exec #2")
+        return errors.New("failed to exec #2")
+    })
+
+    // 启动第三个子任务，它执行成功
+    g.Go(func() error {
+        time.Sleep(15 * time.Second)
+        fmt.Println("exec #3")
+        return nil
+    })
+    // 等待三个任务都完成
+    if err := g.Wait(); err == nil {
+        fmt.Println("Successfully exec all")
+    } else {
+        fmt.Println("failed:", err)
+    }
+}
+```
+
+如果执行下面的这个程序，会显示三个任务都执行了，而 Wait 返回了子任务 2 的错误：
+
+![](images/image-20250620184506133.png)
+
+##### 更进一步，返回所有子任务的错误
+
+
+
+#### 扩展库
+
+
+
+
+
+#### 其它实用的Group并发原语
+
+##### SizedGroup/ErrSizedGrou
 
 go-pkgz/syncs提供了SizedGroup和ErrSizedGroup两个Group并发原语。
 
@@ -4030,23 +4288,61 @@ SizedGroup可以把Context传递给子任务，这样可以通过cancel让子任
 
 
 
-#### gollback
+### 18.2 gollback
 
 gollback也是用来处理一组子任务的执行的，不过它解决了ErrGroup收集子任务返回结果的痛点。
 
 
 
-
-
-#### Hunch
-
+#### All方法
 
 
 
+#### **Race 方法**
 
-#### schedgroup
 
 
+#### Retry方法
+
+
+
+### 18.3 Hunch
+
+
+
+#### All方法
+
+
+
+#### Take方法
+
+
+
+
+
+#### Last方法
+
+
+
+#### Retry方法
+
+
+
+#### Waterfall方法
+
+
+
+
+
+### 18.4 schedgroup
+
+
+
+
+
+
+
+### 总结
 
 
 
@@ -4054,7 +4350,9 @@ gollback也是用来处理一组子任务的执行的，不过它解决了ErrGro
 
 
 
+### 思考题
 
+> 官方扩展库ErrGroup没有实现可以取消子任务的功能，请自己去实现一个子任务可取消的ErrGroup。
 
 
 
@@ -4066,7 +4364,9 @@ gollback也是用来处理一组子任务的执行的，不过它解决了ErrGro
 
 ## 19 在分布式环境中，Leader选举、互斥锁和读写锁该如何实现？
 
-常用来做协调工作的软件系统是Zookeeper、etcd、Consul之类的软件，Zookeeper为Java生态群提供了丰富的分布式并发原语（通过Curator库），但是缺少Go相关的并发原语库。Consul在提供分布式并发原语这件事儿上不是很积极，而etcd就提供了非常好的分布式并发原语，比如分布式互斥锁、分布式读写锁、Leader选举，等等。
+常用来做协调工作的软件系统是Zookeeper、etcd、Consul之类的软件，Zookeeper为Java生态群提供了丰富的分布式并发原语（通过Curator库），但是缺少Go相关的并发原语库。Consul在提供分布式并发原语这件事儿上不是很积极，而etcd就提供了非常好的分布式并发原语，比如**分布式互斥锁、分布式读写锁、Leader选举**，等等。
+
+etcd为基础，介绍几种分布式并发原语。
 
 ### 19.1 Leader选举
 
@@ -4086,33 +4386,450 @@ Leader选举常常用在==主从架构==的系统中。主从架构中的服务�
 
 
 
+```go
+package main
+
+// 导入所需的库
+import (
+    "bufio"
+    "context"
+    "flag"
+    "fmt"
+    "log"
+    "os"
+    "strconv"
+    "strings"
+
+    "github.com/coreos/etcd/clientv3"
+    "github.com/coreos/etcd/clientv3/concurrency"
+)
+
+// 可以设置一些参数，比如节点ID
+var (
+    nodeID    = flag.Int("id", 0, "node ID")
+    addr      = flag.String("addr", "http://127.0.0.1:2379", "etcd addresses")
+    electName = flag.String("name", "my-test-elect", "election name")
+)
+
+func main() {
+    flag.Parse()
+
+    // 将etcd的地址解析成slice of string
+    endpoints := strings.Split(*addr, ",")
+
+    // 生成一个etcd的clien
+    cli, err := clientv3.New(clientv3.Config{Endpoints: endpoints})
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer cli.Close()
+
+    // 创建session,如果程序宕机导致session断掉，etcd能检测到
+    session, err := concurrency.NewSession(cli)
+    defer session.Close()
+
+    // 生成一个选举对象。下面主要使用它进行选举和查询等操作
+    // 另一个方法ResumeElection可以使用既有的leader初始化Election
+    e1 := concurrency.NewElection(session, *electName)
+
+    // 从命令行读取命令
+    consolescanner := bufio.NewScanner(os.Stdin)
+    for consolescanner.Scan() {
+        action := consolescanner.Text()
+        switch action {
+        case "elect": // 选举命令
+            go elect(e1, *electName)
+        case "proclaim": // 只更新leader的value
+            proclaim(e1, *electName)
+        case "resign": // 辞去leader,重新选举
+            resign(e1, *electName)
+        case "watch": // 监控leader的变动
+            go watch(e1, *electName)
+        case "query": // 查询当前的leader
+            query(e1, *electName)
+        case "rev":
+            rev(e1, *electName)
+        default:
+            fmt.Println("unknown action")
+        }
+    }
+}
+```
+
+
+
 #### 选举
+
+如果你的业务集群还没有主节点，或者主节点宕机了，你就需要发起新一轮的选主操作，主要会用到 **Campaign 和 Proclaim**。如果你需要主节点放弃主的角色，让其它从节点有机会成为主节点，就可以调用 **Resign** 方法。
+
+这里我提到了三个和选主相关的方法，下面我来介绍下它们的用法。
+
+**第一个方法是 Campaign**。它的作用是，把一个节点选举为主节点，并且会设置一个值。它的签名如下所示：
+
+```go
+func (e *Election) Campaign(ctx context.Context, val string) error
+```
+
+需要注意的是，这是一个阻塞方法，在调用它的时候会被阻塞，直到满足下面的三个条件之一，才会取消阻塞。
+
+1. 成功当选为主；
+2. 此方法返回错误；
+3. ctx 被取消。
+
+**第二个方法是 Proclaim**。它的作用是，重新设置 Leader 的值，但是不会重新选主，这个方法会返回新值设置成功或者失败的信息。方法签名如下所示：
+
+```go
+func (e *Election) Proclaim(ctx context.Context, val string) error
+```
+
+**第三个方法是 Resign**：开始新一次选举。这个方法会返回新的选举成功或者失败的信息。它的签名如下所示：
+
+```go
+func (e *Election) Resign(ctx context.Context) (err error)
+```
+
+这三个方法的测试代码如下。你可以使用测试程序进行测试，具体做法是，启动两个节点，执行和这三个方法相关的命令。
+
+```go
+var count int
+// 选主
+func elect(e1 *concurrency.Election, electName string) {
+    log.Println("acampaigning for ID:", *nodeID)
+    // 调用Campaign方法选主,主的值为value-<主节点ID>-<count>
+    if err := e1.Campaign(context.Background(), fmt.Sprintf("value-%d-%d", *nodeID, count)); err != nil {
+        log.Println(err)
+    }
+    log.Println("campaigned for ID:", *nodeID)
+    count++
+}
+// 为主设置新值
+func proclaim(e1 *concurrency.Election, electName string) {
+    log.Println("proclaiming for ID:", *nodeID)
+    // 调用Proclaim方法设置新值,新值为value-<主节点ID>-<count>
+    if err := e1.Proclaim(context.Background(), fmt.Sprintf("value-%d-%d", *nodeID, count)); err != nil {
+        log.Println(err)
+    }
+    log.Println("proclaimed for ID:", *nodeID)
+    count++
+}
+// 重新选主，有可能另外一个节点被选为了主
+func resign(e1 *concurrency.Election, electName string) {
+    log.Println("resigning for ID:", *nodeID)
+    // 调用Resign重新选主
+    if err := e1.Resign(context.TODO()); err != nil {
+        log.Println(err)
+    }
+    log.Println("resigned for ID:", *nodeID)
+}
+```
 
 
 
 #### 查询
 
+除了选举 Leader，程序在启动的过程中，或者在运行的时候，还有可能需要查询当前的主节点是哪一个节点？主节点的值是什么？版本是多少？不光是主从节点需要查询和知道哪一个节点，在分布式系统中，还有其它一些节点也需要知道集群中的哪一个节点是主节点，哪一个节点是从节点，这样它们才能把读写请求分别发往相应的主从节点上。
+
+etcd 提供了查询当前 Leader 的方法 **Leader**，如果当前还没有 Leader，就返回一个错误，你可以使用这个方法来查询主节点信息。这个方法的签名如下：
+
+```go
+func (e *Election) Leader(ctx context.Context) (*v3.GetResponse, error)
+```
+
+每次主节点的变动都会生成一个新的版本号，你还可以查询版本号信息（**Rev** 方法），了解主节点变动情况：
+
+```go
+func (e *Election) Rev() int64
+```
+
+你可以在测试完选主命令后，测试查询命令（query、rev），代码如下：
+
+```go
+// 查询主的信息
+func query(e1 *concurrency.Election, electName string) {
+    // 调用Leader返回主的信息，包括key和value等信息
+    resp, err := e1.Leader(context.Background())
+    if err != nil {
+        log.Printf("failed to get the current leader: %v", err)
+    }
+    log.Println("current leader:", string(resp.Kvs[0].Key), string(resp.Kvs[0].Value))
+}
+// 可以直接查询主的rev信息
+func rev(e1 *concurrency.Election, electName string) {
+    rev := e1.Rev()
+    log.Println("current rev:", rev)
+}
+```
+
 
 
 #### 监控
 
+有了选举和查询方法，还需要一个监控方法。毕竟，如果主节点变化了，我们需要得到最新的主节点信息。
 
+通过 Observe 来监控主的变化，它的签名如下：
+
+```go
+func (e *Election) Observe(ctx context.Context) <-chan v3.GetResponse
+```
+
+它会返回一个 chan，显示主节点的变动信息。需要注意的是，它不会返回主节点的全部历史变动信息，而是只返回最近的一条变动信息以及之后的变动信息。
+
+测试代码如下：
+
+```go
+func watch(e1 *concurrency.Election, electName string) {
+    ch := e1.Observe(context.TODO())
+
+
+    log.Println("start to watch for ID:", *nodeID)
+    for i := 0; i < 10; i++ {
+        resp := <-ch
+        log.Println("leader changed to", string(resp.Kvs[0].Key), string(resp.Kvs[0].Value))
+    }
+}
+```
+
+etcd 提供了选主的逻辑，而你要做的就是利用这些方法，让它们为你的业务服务。在使用的过程中，你还需要做一些额外的设置，比如查询当前的主节点、启动一个 goroutine 阻塞调用 Campaign 方法，等等。虽然你需要做一些额外的工作，但是跟自己实现一个分布式的选主逻辑相比，大大地减少了工作量。
 
 ### 19.2 互斥锁
 
+前面说的互斥锁都是用来保护同一进程内的共享资源的，今天，我们要掌握的是分布式环境中的互斥锁。**我们要重点学习下分布在不同机器中的不同进程内的 goroutine，如何利用分布式互斥锁来保护共享资源。**
 
+互斥锁的应用场景和主从架构的应用场景不太一样。**使用互斥锁的不同节点是没有主从这样的角色的，所有的节点都是一样的，只不过在同一时刻，只允许其中的一个节点持有锁**。
 
+#### Locker
 
+etcd 提供了一个简单的 Locker 原语，它类似于 Go 标准库中的 sync.Locker 接口，也提供了 Lock/UnLock 的机制：
+
+```go
+func NewLocker(s *Session, pfx string) sync.Locker
+```
+
+可以看到，它的返回值是一个 sync.Locker，因为你对标准库的 Locker 已经非常了解了，而且它只有 Lock/Unlock 两个方法，所以，接下来使用这个锁就非常容易了。下面的代码是一个使用 Locker 并发原语的例子：
+
+```go
+package main
+
+import (
+    "flag"
+    "log"
+    "math/rand"
+    "strings"
+    "time"
+
+    "github.com/coreos/etcd/clientv3"
+    "github.com/coreos/etcd/clientv3/concurrency"
+)
+
+var (
+    addr     = flag.String("addr", "http://127.0.0.1:2379", "etcd addresses")
+    lockName = flag.String("name", "my-test-lock", "lock name")
+)
+
+func main() {
+    flag.Parse()
+    
+    rand.Seed(time.Now().UnixNano())
+    // etcd地址
+    endpoints := strings.Split(*addr, ",")
+    // 生成一个etcd client
+    cli, err := clientv3.New(clientv3.Config{Endpoints: endpoints})
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer cli.Close()
+    useLock(cli) // 测试锁
+}
+
+func useLock(cli *clientv3.Client) {
+    // 为锁生成session
+    s1, err := concurrency.NewSession(cli)
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer s1.Close()
+    //得到一个分布式锁
+    locker := concurrency.NewLocker(s1, *lockName)
+
+    // 请求锁
+    log.Println("acquiring lock")
+    locker.Lock()
+    log.Println("acquired lock")
+
+    // 等待一段时间
+    time.Sleep(time.Duration(rand.Intn(30)) * time.Second)
+    locker.Unlock() // 释放锁
+
+    log.Println("released lock")
+}
+```
+
+你可以同时在两个终端中运行这个测试程序。可以看到，它们获得锁是有先后顺序的，一个节点释放了锁之后，另外一个节点才能获取到这个分布式锁。
+
+#### Mutex
+
+ Locker 是基于 Mutex 实现的，只不过，Mutex 提供了查询 Mutex 的 key 的信息的功能。
+
+```go
+func useMutex(cli *clientv3.Client) {
+    // 为锁生成session
+    s1, err := concurrency.NewSession(cli)
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer s1.Close()
+    m1 := concurrency.NewMutex(s1, *lockName)
+
+    //在请求锁之前查询key
+    log.Printf("before acquiring. key: %s", m1.Key())
+    // 请求锁
+    log.Println("acquiring lock")
+    if err := m1.Lock(context.TODO()); err != nil {
+        log.Fatal(err)
+    }
+    log.Printf("acquired lock. key: %s", m1.Key())
+
+    //等待一段时间
+    time.Sleep(time.Duration(rand.Intn(30)) * time.Second)
+
+    // 释放锁
+    if err := m1.Unlock(context.TODO()); err != nil {
+        log.Fatal(err)
+    }
+    log.Println("released lock")
+}
+```
+
+Mutex 并没有实现 sync.Locker 接口，它的 Lock/Unlock 方法需要提供一个 context.Context 实例做参数，这也就意味着，在请求锁的时候，你可以设置超时时间，或者主动取消请求。
 
 ### 19.3 读写锁
+
+etcd 也提供了分布式的读写锁。
+
+etcd 提供的分布式读写锁的功能和标准库的读写锁的功能是一样的。只不过，**etcd 提供的读写锁，可以在分布式环境中的不同的节点使用**。它提供的方法也和标准库中的读写锁的方法一致，分别提供了 RLock/RUnlock、Lock/Unlock 方法。下面的代码是使用读写锁的例子，它从命令行中读取命令，执行读写锁的操作：
+
+```go
+package main
+
+
+import (
+    "bufio"
+    "flag"
+    "fmt"
+    "log"
+    "math/rand"
+    "os"
+    "strings"
+    "time"
+
+    "github.com/coreos/etcd/clientv3"
+    "github.com/coreos/etcd/clientv3/concurrency"
+    recipe "github.com/coreos/etcd/contrib/recipes"
+)
+
+var (
+    addr     = flag.String("addr", "http://127.0.0.1:2379", "etcd addresses")
+    lockName = flag.String("name", "my-test-lock", "lock name")
+    action   = flag.String("rw", "w", "r means acquiring read lock, w means acquiring write lock")
+)
+
+
+func main() {
+    flag.Parse()
+    rand.Seed(time.Now().UnixNano())
+
+    // 解析etcd地址
+    endpoints := strings.Split(*addr, ",")
+
+    // 创建etcd的client
+    cli, err := clientv3.New(clientv3.Config{Endpoints: endpoints})
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer cli.Close()
+    // 创建session
+    s1, err := concurrency.NewSession(cli)
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer s1.Close()
+    m1 := recipe.NewRWMutex(s1, *lockName)
+
+    // 从命令行读取命令
+    consolescanner := bufio.NewScanner(os.Stdin)
+    for consolescanner.Scan() {
+        action := consolescanner.Text()
+        switch action {
+        case "w": // 请求写锁
+            testWriteLocker(m1)
+        case "r": // 请求读锁
+            testReadLocker(m1)
+        default:
+            fmt.Println("unknown action")
+        }
+    }
+}
+
+func testWriteLocker(m1 *recipe.RWMutex) {
+    // 请求写锁
+    log.Println("acquiring write lock")
+    if err := m1.Lock(); err != nil {
+        log.Fatal(err)
+    }
+    log.Println("acquired write lock")
+
+    // 等待一段时间
+    time.Sleep(time.Duration(rand.Intn(10)) * time.Second)
+
+    // 释放写锁
+    if err := m1.Unlock(); err != nil {
+        log.Fatal(err)
+    }
+    log.Println("released write lock")
+}
+
+func testReadLocker(m1 *recipe.RWMutex) {
+    // 请求读锁
+    log.Println("acquiring read lock")
+    if err := m1.RLock(); err != nil {
+        log.Fatal(err)
+    }
+    log.Println("acquired read lock")
+
+    // 等待一段时间
+    time.Sleep(time.Duration(rand.Intn(10)) * time.Second)
+
+    // 释放写锁
+    if err := m1.RUnlock(); err != nil {
+        log.Fatal(err)
+    }
+    log.Println("released read lock")
+}
+```
+
+### 总结
+
+自己实现分布式环境的并发原语，是相当困难的一件事，因为你需要考虑网络的延迟和异常、节点的可用性、数据的一致性等多种情况。
+
+所以，可以借助etcd这样成熟的框架，基于它提供的分布式并发原语处理分布式的场景。需要注意的是，在使用这些分布式并发原语的时候，你需要考虑异常的情况，比如网络断掉等。同时，分布式并发原语需要网络之间的通讯，所以会比使用标准库中的并发原语耗时更长。
 
 
 
 ![](images/image-20250221151409043.png)
 
+### 思考题
+
+> 如果持有互斥锁或者读写锁的节点意外宕机了，它持有的锁会不会被释放？
+
+
+
+> etcd提供的读写锁中的读和写有没有优先级？
+
 
 
 ## 20 在分布式环境中，队列、栅栏和STM该如何实现？
+
+基于 etcd 的分布式队列、栅栏和 STM。
 
 ### 20.1 分布式队列和优先级队列
 
@@ -4134,7 +4851,25 @@ Leader选举常常用在==主从架构==的系统中。主从架构中的服务�
 
 
 
+### 总结
+
+如果我们把眼光放得更宽广一些，其实并不只是 etcd 提供了这些并发原语，比如我上节课一开始就提到了，Zookeeper 很早也提供了类似的并发原语，只不过只提供了 Java 的库，并没有提供合适的 Go 库。另外，根据 Consul 官方的反馈，他们并没有开发这些并发原语的计划，所以，从目前来看，etcd 是个不错的选择。
+
+当然，也有一些其它不太知名的分布式原语库，但是活跃度不高，可用性低，所以我们也不需要去了解了。
+
+其实，你也可以使用 Redis 实现分布式锁，或者是基于 MySQL 实现分布式锁，这也是常用的选择。对于大厂来说，选择起来是非常简单的，只需要看看厂内提供了哪个基础服务，哪个更稳定些。对于没有 etcd、Redis 这些基础服务的公司来说，很重要的一点，就是自己搭建一套这样的基础服务，并且运维好，这就需要考察你们对 etcd、Redis、MySQL 的技术把控能力了，哪个用得更顺手，就用哪个。
+
+一般来说，我不建议你自己去实现分布式原语，最好是直接使用 etcd、Redis 这些成熟的软件提供的功能，这也意味着，我们将程序的风险转嫁到了这些基础服务上，这些基础服务必须要能够提供足够的服务保障。
+
 ![](images/image-20250221151716047.png)
+
+### 思考题
+
+> 部署一个 3 节点的 etcd 集群，测试一下分布式队列的性能。
+
+
+
+> etcd 提供的 STM 是分布式事务吗？
 
 
 
