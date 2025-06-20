@@ -424,7 +424,7 @@ func (c *Counter2) Count() uint64 {
 
 
 
-## 2 Mutex：庖丁解牛看实现
+## 2 Mutex：庖丁解牛看实现🔖
 
 Mutex的演进历史，是从一个简单易于理解的互斥锁的实现，到一个非常复杂的数据结构，这是一个逐步完善的过程。
 
@@ -481,7 +481,7 @@ func (m *Mutex) Unlock() {
 
 > **==CAS指令==**将给定的值和一个内存地址中的值进行比较，如果它们是同一个值，就使用新值替换内存地址中的值，这个操作是**原子性**的。
 >
-> 原子性保证这个指令总是基于最新的值进行计算，如果同时有其它线程已经修改了这个值，那么，CAS会返回失败。
+> 原子性保证这个指令**总是基于最新的值进行计算**，如果同时有其它线程已经修改了这个值，那么，CAS会返回失败。
 >
 > **CAS是实现互斥锁和同步原语的基础**。
 
@@ -494,15 +494,69 @@ func (m *Mutex) Unlock() {
 
 调用Lock请求锁的时候，通过`xadd`方法进行CAS操作（第24行），xadd方法通过循环执行CAS操作直到成功，保证对key加1的操作成功完成。
 
-如果比较幸运，锁没有被别的goroutine持有，那么，Lock方法成功地将key设置为1，这个goroutine就持有了这个锁；如果锁已经被别的goroutine持有了，那么，当前的goroutine会把key加1，而且还会调用`semacquire`方法（第27行），使用信号量将自己休眠，等锁释放的时候，信号量会将它唤醒。
+如果比较幸运，锁没有被别的goroutine持有，那么，Lock方法成功地将key设置为1，这个goroutine就持有了这个锁；如果锁已经被别的goroutine持有了，那么，当前的goroutine会把key加1，而且还会调用`semacquire`方法（第27行），**使用信号量将自己休眠**，等锁释放的时候，信号量会将它唤醒。
 
-有锁的goroutine调用Unlock释放锁时，它会将key减1（第31行）。如果当前没有其它等待这个锁的goroutine，这个方法就返回了。但是，如果还有等待此锁的其它goroutine，那么，它会调用semrelease方法（第34行），利用信号量唤醒等待锁的其它goroutine中的一个。
+有锁的goroutine调用Unlock释放锁时，它会将key减1（第31行）。如果当前没有其它等待这个锁的goroutine，这个方法就返回了。但是，如果还有等待此锁的其它goroutine，那么，它会调用`semrelease`方法（第34行），**利用信号量唤醒等待锁的其它goroutine中的一个**。
 
 总结，初版的Mutex利用CAS原子操作，对key这个标志量进行设置。key不仅仅标识了锁是否被goroutine所持有，还记录了当前持有和等待获取锁的goroutine的数量。
 
 注意，**Unlock方法可以被任意的goroutine调用释放锁，即使是没持有这个互斥锁的goroutine，也可以进行这个操作。这是因为，==Mutex本身并没有包含持有这把锁的goroutine的信息==，所以，Unlock也不会对此进行检查。Mutex的这个设计一直保持至今。**
 
-🔖
+> 其它goroutine可以强制释放锁，这是一个非常危险的操作，因为在临界区的goroutine可能不知道锁已经被释放了，还会继续执行临界区的业务操作，这可能会带来意想不到的结果，因为这个goroutine还以为自己持有锁呢，有可能导致data race问题。
+
+所以，在使用Mutex的时候，必须要保证goroutine**尽可能不去释放自己未持有的锁**，一定要遵循“**==谁申请，谁释放==**”的原则。在真实的实践中，使用互斥锁的时候，很少在一个方法中单独申请锁，而在另外一个方法中单独释放锁，一般都会**==在同一个方法中获取锁和释放锁==**。
+
+Go这一点和其它语言（比如Java语言）的互斥锁的实现不同，所以，从其它语言转到Go语言开发的同学，一定要注意。
+
+以前，我们经常会基于性能的考虑，及时释放掉锁，所以在一些if-else分支中加上释放锁的代码，代码看起来很臃肿。而且，在重构的时候，也很容易因为误删或者是漏掉而出现死锁的现象。
+
+```go
+type Foo struct {
+    mu    sync.Mutex
+    count int
+}
+
+func (f *Foo) Bar() {
+    f.mu.Lock()
+
+    if f.count < 1000 {
+        f.count += 3
+        f.mu.Unlock() // 此处释放锁
+        return
+    }
+
+    f.count++
+    f.mu.Unlock() // 此处释放锁
+    return
+}
+```
+
+从1.14版本起，Go对defer做了优化，采用更有效的**内联方式**，取代之前的生成defer对象到defer chain中，defer对耗时的影响微乎其微了，所以基本上修改成下面简洁的写法也没问题：
+
+```go
+func (f *Foo) Bar() {
+    f.mu.Lock()
+    defer f.mu.Unlock()
+
+
+    if f.count < 1000 {
+        f.count += 3
+        return
+    }
+
+
+    f.count++
+    return
+}
+```
+
+这样做的好处就**是Lock/Unlock总是成对紧凑出现**，不会遗漏或者多调用，代码更少。
+
+但是，**如果临界区只是方法中的一部分，为了尽快释放锁，还是应该第一时间调用Unlock，而不是一直等到方法返回时才释放**。
+
+> 初版的Mutex实现有一个问题：
+>
+> 请求锁的goroutine会排队等待获取互斥锁。虽然这貌似很公平，但是从性能上来看，却不是最优的。因为如果我们能够把锁交给正在占用CPU时间片的goroutine的话，那就不需要做上下文的切换，在高并发的情况下，可能会有更好的性能。
 
 ### 2.2 给新人机会
 
@@ -525,9 +579,9 @@ const (
 
 state是一个复合型的字段，一个字段包含多个意义，这样可以通过尽可能少的内存来实现互斥锁。
 
-这个字段的第一位（最小的一位）来表示这个锁是否被持有，第二位代表是否有唤醒的goroutine，剩余的位数代表的是等待此锁的goroutine数。所以，state这一个字段被分成了三部分，代表三个数据。
+这个字段的第一位（最小的一位）来表示这个**锁是否被持有**，第二位代表**是否有唤醒的goroutine**，剩余的位数代表的是**等待此锁的goroutine数**。所以，state这一个字段被分成了三部分，代表三个数据。
 
-请求锁的方法Lock也变得复杂了:
+请求锁的方法Lock的逻辑也变得复杂了:
 
 ```go
 func (m *Mutex) Lock() {
@@ -561,13 +615,19 @@ func (m *Mutex) Lock() {
 
 首先是通过CAS检测state字段中的标志（第3行），如果没有goroutine持有锁，也没有等待持有锁的gorutine，那么，当前的goroutine就很幸运，可以直接获得锁，这也是注释中的Fast path的意思。
 
-🔖
+如果不够幸运，state不是零值，那么就通过一个循环进行检查。接下来的第7行到第26行这段代码虽然只有几行，但是理解起来却要费一番功夫，因为涉及到对state不同标志位的操作。这里的位操作以及操作后的结果和数值比较，并没有明确的解释，有时候你需要根据后续的处理进行推断。所以说，如果你充分理解了这段代码，那么对最新版的Mutex也会比较容易掌握了，因为你已经清楚了这些位操作的含义。
 
+先前知道，如果想要获取锁的goroutine没有机会获取到锁，就会进行休眠，但是在锁释放唤醒之后，它并不能像先前一样直接获取到锁，还是要和正在请求锁的goroutine进行竞争。这会给后来请求锁的goroutine一个机会，也让CPU中正在执行的goroutine有更多的机会获取到锁，在一定程度上提高了程序的性能。
 
+for循环是不断尝试获取锁，如果获取不到，就通过`runtime.Semacquire(&m.sema)`休眠，休眠醒来之后awoke置为true，尝试争抢锁。
 
-请求锁的goroutine有两类，一类是新来请求锁的goroutine，另一类是被唤醒的等待请求锁的goroutine。
+代码中的第10行将当前的flag设置为加锁状态，如果能成功地通过CAS把这个新值赋予state（第19行和第20行），就代表抢夺锁的操作成功了。
 
-锁的状态也有两种：加锁和未加锁。
+不过，需要注意的是，如果成功地设置了state的值，但是之前的state是有锁的状态，那么，state只是清除`mutexWoken`标志或者增加一个waiter而已。
+
+请求锁的goroutine有两类，一类是**新来请求锁的goroutine**，另一类是**被唤醒的等待请求锁的goroutine**。
+
+锁的状态也有两种：**加锁**和**未加锁**。
 
 用一张表格，来说明一下goroutine不同来源不同状态下的处理逻辑：
 
@@ -600,17 +660,23 @@ func (m *Mutex) Unlock() {
 }
 ```
 
-🔖
+第3行是尝试将持有锁的标识设置为未加锁的状态，这是通过减1而不是将标志位置零的方式实现。第4到6行还会检测原来锁的状态是否已经未加锁的状态，如果是Unlock一个未加锁的Mutex会直接panic。
 
+不过，即使将加锁置为未加锁的状态，这个方法也不能直接返回，还需要一些额外的操作，因为还可能有一些等待这个锁的goroutine（有时候我也把它们称之为waiter）需要通过信号量的方式唤醒它们中的一个。所以接下来的逻辑有两种情况。
 
+第一种情况，如果没有其它的waiter，说明对这个锁的竞争的goroutine只有一个，那就可以直接返回了；如果这个时候有唤醒的goroutine，或者是又被别人加了锁，那么，无需我们操劳，其它goroutine自己干得都很好，当前的这个goroutine就可以放心返回了。
+
+第二种情况，如果有等待者，并且没有唤醒的waiter，那就需要唤醒一个等待的waiter。在唤醒之前，需要将waiter数量减1，并且将mutexWoken标志设置上，这样，Unlock就可以返回了。
+
+通过这样复杂的检查、判断和设置，就可以安全地将一把互斥锁释放了。
 
 总结，相对于初版的设计，这次的改动主要就是，**新来的goroutine也有机会先获取到锁，甚至一个goroutine可能连续获取到锁，打破了先来先得的逻辑。但是，代码复杂度也显而易见。**
 
-
+虽然这一版的Mutex已经给新来请求锁的goroutine一些机会，让它参与竞争，没有空闲的锁或者竞争失败才加入到等待队列中。但是其实还可以进一步优化。
 
 ### 2.3 多给些机会
 
-2015年2月，如果新来的goroutine或者是被唤醒的goroutine首次获取不到锁，它们就会通过**自旋（spin**，通过循环不断尝试，spin的逻辑是在runtime实现的）的方式，尝试检查锁是否被释放。在尝试一定的自旋次数后，再执行原来的逻辑。
+2015年2月，如果新来的goroutine或者是被唤醒的goroutine首次获取不到锁，它们就会通过**==自旋==（spin**，通过循环不断尝试，spin的逻辑是在runtime实现的）的方式，尝试检查锁是否被释放。在尝试一定的自旋次数后，再执行原来的逻辑。
 
 ```go
 func (m *Mutex) Lock() {
@@ -653,6 +719,8 @@ func (m *Mutex) Lock() {
   }
 }
 ```
+
+这次的优化，增加了第13行到21行、第25行到第27行以及第36行。
 
 如果可以spin的话，第9行的for循环会重新检查锁是否释放。对于临界区代码执行非常短的场景来说，这是一个非常好的优化。
 
@@ -815,6 +883,10 @@ func (m *Mutex) unlockSlow(new int32) {
 }
 ```
 
+跟之前的实现相比，当前的Mutex最重要的变化，就是增加**饥饿模式**。第12行将饥饿模式的最大等待时间阈值设置成了1毫秒，这就意味着，**一旦等待者等待的时间超过了这个阈值，Mutex的处理就有可能进入饥饿模式，优先让等待者先获取到锁，新来的同学主动谦让一下，给老同志一些机会。**
+
+通过加入饥饿模式，可以避免把机会全都留给新来的goroutine，保证了请求锁的goroutine获取锁的公平性，对于我们使用锁的业务代码来说，不会有业务一直等待锁不被处理。
+
 `state` 字段是一个 int32 类型的整数，它通过位标志来存储互斥锁的多种状态。
 
 位标志的位置：
@@ -848,29 +920,213 @@ state 字段的结构：
 
 
 
-🔖
-
 ### 2.5 饥饿模式和正常模式
 
+Mutex可能处于两种操作模式下：**正常模式和饥饿模式**。
 
+请求锁时调用的Lock方法中一开始是fast path，这是一个幸运的场景，当前的goroutine幸运地获得了锁，没有竞争，直接返回，否则就进入了lockSlow方法。这样的设计，方便编译器对Lock方法进行内联，你也可以在程序开发中应用这个技巧。
+
+正常模式下，waiter都是进入先入先出队列，被唤醒的waiter并不会直接持有锁，而是要和新来的goroutine进行竞争。新来的goroutine有先天的优势，它们正在CPU中运行，可能它们的数量还不少，所以，在高并发情况下，被唤醒的waiter可能比较悲剧地获取不到锁，这时，它会被插入到队列的前面。如果waiter获取不到锁的时间超过阈值1毫秒，那么，这个Mutex就进入到了饥饿模式。
+
+在饥饿模式下，Mutex的拥有者将直接把锁交给队列最前面的waiter。新来的goroutine不会尝试获取锁，即使看起来锁没有被持有，它也不会去抢，也不会spin，它会乖乖地加入到等待队列的尾部。
+
+如果拥有Mutex的waiter发现下面两种情况的其中之一，它就会把这个Mutex转换成正常模式:
+
+- 此waiter已经是队列中的最后一个waiter了，没有其它的等待锁的goroutine了；
+- 此waiter的等待时间小于1毫秒。
+
+正常模式拥有更好的性能，因为即使有等待抢锁的waiter，goroutine也可以连续多次获取到锁。
+
+饥饿模式是对公平性和性能的一种平衡，它避免了某些goroutine长时间的等待锁。在饥饿模式下，优先对待的是那些一直在等待的waiter。
+
+**逐步分析下Mutex代码的关键行，彻底搞清楚饥饿模式的细节。**
+
+请求锁（lockSlow）的逻辑看起。
+
+- 第9行对state字段又分出了一位，用来标记锁是否处于饥饿状态。现在一个state的字段被划分成了阻塞等待的waiter数量、饥饿标记、唤醒标记和持有锁的标记四个部分。
+- 第25行记录此goroutine请求锁的初始时间，第26行标记是否处于饥饿状态，第27行标记是否是唤醒的，第28行记录spin的次数。
+- 第31行到第40行和以前的逻辑类似，只不过加了一个不能是饥饿状态的逻辑。它会对正常状态抢夺锁的goroutine尝试spin，和以前的目的一样，就是在临界区耗时很短的情况下提高性能。
+- 第42行到第44行，非饥饿状态下抢锁。怎么抢？就是要把state的锁的那一位，置为加锁状态，后续CAS如果成功就可能获取到了锁。
+- 第46行到第48行，如果锁已经被持有或者锁处于饥饿状态，我们最好的归宿就是等待，所以waiter的数量加1。
+- 第49行到第51行，如果此goroutine已经处在饥饿状态，并且锁还被持有，那么，我们需要把此Mutex设置为饥饿状态。
+
+- 第52行到第57行，是清除mutexWoken标记，因为不管是获得了锁还是进入休眠，我们都需要清除mutexWoken标记。
+- 第59行就是尝试使用CAS设置state。如果成功，第61行到第63行是检查原来的锁的状态是未加锁状态，并且也不是饥饿状态的话就成功获取了锁，返回。
+- 第67行判断是否第一次加入到waiter队列。到这里，你应该就能明白第25行为什么不对waitStartTime进行初始化了，我们需要利用它在这里进行条件判断。
+- 第72行将此waiter加入到队列，如果是首次，加入到队尾，先进先出。如果不是首次，那么加入到队首，这样等待最久的goroutine优先能够获取到锁。此goroutine会进行休眠。
+- 第74行判断此goroutine是否处于饥饿状态。注意，执行这一句的时候，它已经被唤醒了。
+- 第77行到第88行是对锁处于饥饿状态下的一些处理。
+- 第82行设置一个标志，这个标志稍后会用来加锁，而且还会将waiter数减1。
+- 第84行，设置标志，在没有其它的waiter或者此goroutine等待还没超过1毫秒，则会将Mutex转为正常状态。
+- 第86行则是将这个标识应用到state字段上。
+
+释放锁（Unlock）时调用的Unlock的fast path不用多少，所以我们主要看unlockSlow方法就行。
+
+如果Mutex处于饥饿状态，第123行直接唤醒等待队列中的waiter。
+
+如果Mutex处于正常状态，如果没有waiter，或者已经有在处理的情况了，那么释放就好，不做额外的处理（第112行到第114行）。
+
+否则，waiter数减1，mutexWoken标志设置上，通过CAS更新state的值（第115行到第119行）。
 
 ### 总结
 
 Go创始者的哲学，就是他们**强调Go语言和标准库的稳定性**，新版本要向下兼容，用新的版本总能编译老的代码。Go语言从出生到现在已经10多年了，这个Mutex对外的接口却没有变化，依然向下兼容，即使现在Go出了两个版本，每个版本也会向下兼容，保持Go语言的稳定性，你也能领悟他们软件开发和设计的思想。
 
-
-
-
+### 思考题1
 
 > 目前Mutex的state字段有几个意义，这几个意义分别是由哪些字段表示的？
+
+Go 语言 `sync.Mutex` 的 `state` 字段是一个 32 位整数（`int32`），通过位操作同时记录锁的多种状态信息。其核心含义可分为以下四部分，分别由不同位段表示：
+
+#### 1. `mutexLocked`（锁占用状态）
+
+- **位位置**：第 0 位（最低位）
+- 含义：
+  - `1`：锁已被占用（锁定状态）
+  - `0`：锁未被占用（未锁定状态）
+- **作用**：直接表示锁是否被持有。
+
+#### 2. `mutexWoken`（唤醒标记）
+
+- **位位置**：第 1 位
+- 含义：
+  - `1`：已有协程被唤醒，正在尝试获取锁；
+  - `0`：无协程被唤醒。
+- **作用**：避免重复唤醒等待队列中的协程，减少无效竞争（例如在自旋或解锁时通知锁无需唤醒其他协程）。
+
+#### 3. `mutexStarving`（饥饿模式标记）
+
+- **位位置**：第 2 位
+- 含义：
+  - `1`：锁处于饥饿模式；
+  - `0`：锁处于正常模式。
+- **触发条件**：当等待队列中的协程超过 **1ms** 未获得锁时，锁自动进入饥饿模式。
+- 作用：
+  - **饥饿模式**：新请求锁的协程直接加入队列尾部，锁所有权直接移交给队首协程，避免长期等待；
+  - **正常模式**：新协程可与被唤醒的协程竞争锁（性能更优）。
+
+#### 4. `mutexWaiterShift`（等待协程计数）
+
+- **位位置**：第 3 至 31 位（共 29 位）
+- **含义**：记录当前阻塞等待锁的协程数量（FIFO 队列长度）。
+- 操作：
+  - 协程加入等待队列时：`state += 1 << mutexWaiterShift`；
+  - 唤醒队首协程时：`state -= 1 << mutexWaiterShift`。
+
+#### 状态字段总结
+
+| **位位置**     | **字段名**         | **具体含义**                                                 |
+| -------------- | ------------------ | ------------------------------------------------------------ |
+| **第 0 位**    | `mutexLocked`      | 锁是否被占用（1=锁定，0=未锁定）                             |
+| **第 1 位**    | `mutexWoken`       | 是否有协程被唤醒（1=已唤醒，0=未唤醒）                       |
+| **第 2 位**    | `mutexStarving`    | 是否处于饥饿模式（1=饥饿模式，0=正常模式）                   |
+| **第 3-31 位** | `mutexWaiterShift` | 等待锁的协程数量（通过右移操作获取实际值：`state >> mutexWaiterShift`） |
+
+#### 状态转换与锁行为
+
+1. 正常模式 → 饥饿模式：
+   - 当等待队列中的协程 **超过 1ms 未获得锁** 时触发。
+2. 饥饿模式 → 正常模式：
+   - 队首协程获得锁后，若满足以下任一条件：
+     - 它是队列中**最后一个等待者**；
+     - 它的等待时间 **不足 1ms**。
+
+
+
+#### 设计哲学
+
+- **高效性**：通过单字段的位操作，避免多字段同步的复杂性，减少原子操作次数。
+- **公平性**：饥饿模式防止尾部延迟问题，确保长期等待的协程不被“饿死”。
+- **性能平衡**：正常模式优化高频低竞争场景，饥饿模式保障高竞争下的公平性。
+
+> 例如：当 `state = 0b10011`（二进制）时：
 >
+> - 第 0 位 `1`：锁被占用；
+> - 第 1 位 `1`：有协程被唤醒；
+> - 第 2 位 `0`：正常模式；
+> - 高位 `0b10`（十进制 2）：2 个协程在等待队列中。
+
+此设计通过**位压缩**在保证并发安全的同时，最小化内存占用（仅 8 字节）并提升性能。
+
+
+
+### 思考题2
+
 > 等待一个Mutex的goroutine数最大是多少？是否能满足现实的需求？
+
+在 Go 语言中，`sync.Mutex` 的等待队列长度（即等待锁的 goroutine 数量）由 `state` 字段的高 29 位表示（总计 32 位，低 3 位用于锁状态标记），因此理论最大等待数为 **2²⁹ - 1 ≈ 5.36 亿**。以下从理论和实际需求角度分析其合理性：
+
+#### 1. 理论上限：设计足以覆盖绝大多数场景
+
+- **技术实现**：
+  `state` 字段的 ​**第 3–31 位**​（共 29 位）记录等待 goroutine 数量。按无符号整数计算，最大值为 `(1<<29) - 1 = 536,870,911`。
+- **设计意图**：
+  此上限远超实际需求，旨在避免因计数溢出导致逻辑错误，确保极端情况下仍能稳定运行。
+
+#### 2. 现实瓶颈：系统资源限制远早于理论值
+
+尽管理论上限极高，实际应用中**系统资源会成为更早的瓶颈**：
+
+- **文件描述符限制**：
+  Go 程序默认对单个文件/socket 的并发操作上限为 ​**1,048,575**​（`max 1048575`）。超过此值会触发 `panic: too many concurrent operations`，常见于高频日志输出（如 `fmt.Printf`）或网络请求场景。
+- **内存与调度开销**：
+  每个 goroutine 初始栈约 2KB，百万级协程需 ​**2GB+ 内存**​（不含业务数据）。同时，大量阻塞的 goroutine 会加重调度器负担，导致延迟飙升。
+- **CPU 竞争与锁性能塌陷**：
+  当等待队列过长时，锁竞争加剧，Mutex 可能进入**饥饿模式**​（等待 >1ms 时触发），此时新请求直接入队而非自旋，进一步降低吞吐。
+
+> ✅ **结论**：实际场景中，**数万级等待队列已属高负载**，百万级需优化架构，理论上限 5.36 亿仅作为安全冗余。
+
+#### 3. 优化建议：避免等待队列膨胀
+
+若观察到 Mutex 等待队列持续增长（如通过 `pprof` 或监控指标），需针对性优化：
+
+1. **减少锁粒度**
+
+   - 将大锁拆分为多个细粒度锁（如分片锁）。
+   - 示例：全局 Map 改为 `sync.Map` 或分片 Map（`[N]struct{mu sync.Mutex; data map[K]V}`）。
+
+2. **替换同步机制**
+
+   - **读多写少**场景：用 `sync.RWMutex` 替代 `Mutex`，允许多读并行。
+   - **高频计数**：改用 `atomic` 原子操作（如 `atomic.AddInt32`）。
+
+3. **限制并发协程数**
+
+   - 使用带缓冲的 Channel 作为信号量：
+
+     ```go
+     sem := make(chan struct{}, 1000) // 限制并发 1000 个协程
+     go func() {
+         sem <- struct{}{}    // 获取信号量
+         defer func() { <-sem }() // 释放
+         // 业务逻辑
+     }()
+     ```
+
+   - 或使用协程池（如 `ants`、`tunny`）。
+
+4. **缩短临界区执行时间**
+
+   - 避免在锁内执行 I/O、复杂计算等耗时操作。
+   - 预处理数据后，仅将结果写入保护区域。
+
+#### 总结：上限充足，但需关注实际瓶颈
+
+| **维度**         | **理论支持**     | **现实约束**                  | **应对措施**             |
+| ---------------- | ---------------- | ----------------------------- | ------------------------ |
+| **等待数量上限** | 5.36 亿          | 百万级（受限于内存/文件句柄） | 优化锁粒度、替换同步机制 |
+| **性能影响**     | 饥饿模式触发     | 延迟飙升、吞吐下降            | 限制并发、缩短临界区     |
+| **稳定性风险**   | 溢出风险接近为零 | 资源耗尽崩溃                  | 监控 + 协程池化          |
+
+实际开发中，**无需担忧等待队列的理论上限**，但应通过性能监控和架构优化，将等待数控制在千级以内，以确保高并发下的稳定性和响应速度。
 
 
 
 ## 3 Mutex：4种易错场景大盘点
 
 当前Mutex的实现复杂，主要是**针对饥饿模式和公平性问题，做了一些额外处理**。但Mutex使用起来还是非常简单的，它只有Lock和Unlock两个方法。
+
+正常使用Mutex时，确实是这样的，很简单，基本不会有什么错误，即使出现错误，也是在一些复杂的场景中，比如**跨函数调用Mutex或者是在重构或者修补Bug时误操作**。但是，使用Mutex时，确实会出现一些Bug，比如说**忘记释放锁、重入锁、复制已使用了的Mutex**等情况。
 
 ### 3.1 常见的4种错误场景
 
@@ -898,7 +1154,13 @@ func foo() {
 
 #### 2️⃣Copy已使用的Mutex
 
-🔖
+小知识点：Package sync的同步原语在使用后是不能复制的。
+
+> Mutex是最常用的一个同步原语，那它也是不能复制的。为什么呢？
+
+原因在于，Mutex是一个有状态的对象，它的state字段记录这个锁的状态。如果你要复制一个已经加锁的Mutex给一个新的变量，那么新的刚初始化的变量居然被加锁了，这显然不符合你的期望，因为你期望的是一个零值的Mutex。关键是在并发环境下，你根本不知道要复制的Mutex状态是什么，因为要复制的Mutex是由其它goroutine并发访问的，状态可能总是在变化。
+
+实际在使用的时候，一不小心就踩了这个坑:
 
 ```go
 type Counter struct {
@@ -923,7 +1185,7 @@ func foo(c Counter) {
 }
 ```
 
-在调用 foo 函数的时候，调用者会复制 Mutex 变量 c 作为 foo 函数的参数，不幸的是，复制之前已经使用了这个锁，这就导致，复制的 Counter 是一个带状态 Counter。
+第12行在调用 foo 函数的时候，调用者会复制 Mutex 变量 c 作为 foo 函数的参数，不幸的是，复制之前已经使用了这个锁，这就导致，复制的 Counter 是一个带状态 Counter。
 
 Go 在运行时，有**==死锁的检查机制==**（`checkdead()` 方法），它能够发现死锁的 goroutine。这个例子中因为复制了一个使用了的 Mutex，导致锁无法使用，程序处于死锁的状态。程序运行的时候，死锁检查机制能够发现这种死锁情况并输出错误信息，如下图中错误信息以及错误堆栈：
 
@@ -935,9 +1197,23 @@ Go 在运行时，有**==死锁的检查机制==**（`checkdead()` 方法），�
 
 ##### vet 工具是怎么发现 Mutex 复制使用问题的呢？
 
-通过[copylock](https://github.com/golang/tools/blob/master/go/analysis/passes/copylock/copylock.go)分析器静态分析实现的。这个分析器会分析函数调用、range 遍历、复制、声明、函数返回值等位置，有没有锁的值 copy 的情景，以此来判断有没有问题。
+通过[copylock](https://github.com/golang/tools/blob/master/go/analysis/passes/copylock/copylock.go)分析器静态分析实现的。这个分析器会分析函数调用、range 遍历、复制、声明、函数返回值等位置，有没有锁的值 copy 的情景，以此来判断有没有问题。可以说，只要是实现了Locker接口，就会被分析。我们看到，下面的代码就是确定什么类型会被分析，其实就是实现了Lock/Unlock两个方法的Locker接口：
 
-🔖
+```go
+var lockerType *types.Interface
+	
+// Construct a sync.Locker interface type.
+func init() {
+  nullary := types.NewSignature(nil, nil, nil, false) // func()
+  methods := []*types.Func{
+    types.NewFunc(token.NoPos, nil, "Lock", nullary),
+    types.NewFunc(token.NoPos, nil, "Unlock", nullary),
+  }
+  lockerType = types.NewInterface(methods, nil).Complete()
+}
+```
+
+其实，有些没有实现Locker接口的同步原语（比如WaitGroup），也能被分析。
 
 #### 3️⃣重入
 
@@ -948,6 +1224,8 @@ Go 在运行时，有**==死锁的检查机制==**（`checkdead()` 方法），�
 **Mutex不是可重入的锁**。
 
 因为Mutex的实现中没有记录哪个goroutine拥有这把锁。理论上，任何goroutine都可以随意地Unlock这把锁，所以没办法计算重入条件。
+
+误用Mutex的重入例子：
 
 ```go
 func foo(l sync.Locker) {
@@ -971,27 +1249,145 @@ func main() {
 }
 ```
 
+运行报错。程序一直在请求锁，但是一直没有办法获取到锁，结果就是 Go 运行时发现死锁了，没有其它地方能够释放锁让程序运行下去，你通过下面的错误堆栈信息就能定位到哪一行阻塞请求锁：
+
 ![](images/image-20250421102615405.png)
 
+虽然标准库 Mutex 不是可重入锁，但是如果就是想要实现一个可重入锁，可以吗？
 
+可以自己实现一个。
 
-自己实现一个可重入锁，关键记住当前是哪个 goroutine 持有这个锁。两个方案：🔖
+自己实现一个可重入锁，关键**记住当前是哪个goroutine持有这个锁**。两个方案：
 
 ##### 方案一：goroutine id
 
 通过 hacker 的方式获取到 goroutine id，记录下获取锁的 goroutine id，它可以实现 Locker 接口。
 
+这个方案的关键第一步是获取goroutine id，方式有两种，分别是**简单方式和hacker方式**。
+
+- ==简单方式==，就是通过`runtime.Stack`方法获取栈帧信息，栈帧信息里包含goroutine id。你可以看看上面panic时候的贴图，goroutine id明明白白地显示在那里。runtime.Stack方法可以获取当前的goroutine信息，第二个参数为true会输出所有的goroutine信息，信息的格式如下：
+
+```
+goroutine 1 [running]:
+main.main()
+        ....../main.go:19 +0xb1
+```
+
+第一行格式为goroutine xxx，其中xxx就是goroutine id，你只要解析出这个id即可。解析的方法可以采用下面的代码：
+
+```go
+func GoID() int {
+    var buf [64]byte
+    n := runtime.Stack(buf[:], false)
+    // 得到id字符串
+    idField := strings.Fields(strings.TrimPrefix(string(buf[:n]), "goroutine "))[0]
+    id, err := strconv.Atoi(idField)
+    if err != nil {
+        panic(fmt.Sprintf("cannot get goroutine id: %v", err))
+    }
+    return id
+}
+```
+
+
+
+- ==hacker方式==（方案一采取）
+
+首先，获取运行时的g指针，反解出对应的g的结构。每个运行的goroutine结构的g指针保存在当前goroutine的一个叫做**TLS对象**中。
+
+第一步：我们先获取到TLS对象；
+
+第二步：再从TLS中获取goroutine结构的g指针；
+
+第三步：再从g指针中取出goroutine id。
+
+需要注意的是，不同Go版本的goroutine的结构可能不同，所以需要根据Go的不同版本进行调整。当然了，如果想要搞清楚各个版本的goroutine结构差异，所涉及的内容又过于底层而且复杂，学习成本太高。怎么办呢？我们可以重点关注一些库。我们没有必要重复发明轮子，直接使用第三方的库来获取goroutine id就可以了。
+
+[petermattis/goid](https://pkg.go.dev/github.com/petermattis/goid)
+
+实现个可以使用的可重入锁：
+
+```go
+/ RecursiveMutex 包装一个Mutex,实现可重入
+type RecursiveMutex struct {
+    sync.Mutex
+    owner     int64 // 当前持有锁的goroutine id
+    recursion int32 // 这个goroutine 重入的次数
+}
+
+func (m *RecursiveMutex) Lock() {
+    gid := goid.Get()
+    // 如果当前持有锁的goroutine就是这次调用的goroutine,说明是重入
+    if atomic.LoadInt64(&m.owner) == gid {
+        m.recursion++
+        return
+    }
+    m.Mutex.Lock()
+    // 获得锁的goroutine第一次调用，记录下它的goroutine id,调用次数加1
+    atomic.StoreInt64(&m.owner, gid)
+    m.recursion = 1
+}
+
+func (m *RecursiveMutex) Unlock() {
+    gid := goid.Get()
+  	// 非持有锁的goroutine尝试释放锁，错误的使用
+    if atomic.LoadInt64(&m.owner) != gid {
+        panic(fmt.Sprintf("wrong the owner(%d): %d!", m.owner, gid))
+    }
+    // 调用次数减1
+    m.recursion--
+    if m.recursion != 0 { // 如果这个goroutine还没有完全释放，则直接返回
+        return
+    }
+    // 此goroutine最后一次调用，需要释放锁
+    atomic.StoreInt64(&m.owner, -1)
+    m.Mutex.Unlock()
+}
+```
+
 
 
 ##### 方案二：token
 
-调用 Lock/Unlock 方法时，由 goroutine 提供一个 token，用来标识它自己，而不是我们通过 hacker 的方式获取到 goroutine id，但是，这样一来，就不满足 Locker 接口了。
+Go开发者不期望你利用goroutine id做一些不确定的东西，所以，他们没有暴露获取goroutine id的方法。
+
+调用者自己提供一个token，获取锁的时候把这个token传入，释放锁的时候也需要把这个token传入。通过用户传入的token替换方案一中goroutine id，其它逻辑和方案一一致。
+
+```go
+// Token方式的递归锁
+type TokenRecursiveMutex struct {
+    sync.Mutex
+    token     int64
+    recursion int32
+}
+
+// 请求锁，需要传入token
+func (m *TokenRecursiveMutex) Lock(token int64) {
+    if atomic.LoadInt64(&m.token) == token { //如果传入的token和持有锁的token一致，说明是递归调用
+        m.recursion++
+        return
+    }
+    m.Mutex.Lock() // 传入的token不一致，说明不是递归调用
+    // 抢到锁之后记录这个token
+    atomic.StoreInt64(&m.token, token)
+    m.recursion = 1
+}
+
+// 释放锁
+func (m *TokenRecursiveMutex) Unlock(token int64) {
+    if atomic.LoadInt64(&m.token) != token { // 释放其它token持有的锁
+        panic(fmt.Sprintf("wrong the owner(%d): %d!", m.token, token))
+    }
+    m.recursion-- // 当前持有这个锁的token释放锁
+    if m.recursion != 0 { // 还没有回退到最初的递归调用
+        return
+    }
+    atomic.StoreInt64(&m.token, 0) // 没有递归调用了，释放锁
+    m.Mutex.Unlock()
+}
 
 
-
-
-
-可重入锁（递归锁）解决了代码重入或者递归调用带来的死锁问题，同时它也带来了另一个好处，就是我们可以要求，只有持有锁的 goroutine 才能 unlock 这个锁。这也很容易实现，因为在上面这两个方案中，都已经记录了是哪一个 goroutine 持有这个锁。
+```
 
 
 
@@ -1066,9 +1462,7 @@ func main() {
 }
 ```
 
-
-
-
+这个程序没有办法运行成功，因为派出所的处理和物业的处理是一个环路等待的死结。
 
 ```sh
 $ go run deadlock.go
@@ -1112,9 +1506,11 @@ created by main.main in goroutine 1
 
 ```
 
+Go运行时，有死锁探测的功能，能够检查出是否出现了死锁的情况，如果出现了，这个时候你就需要调整策略来处理了。
 
+你可以引入一个第三方的锁，大家都依赖这个锁进行业务处理，比如现在政府推行的一站式政务服务中心。或者是解决持有等待问题，物业不需要看到派出所的证明才给开物业证明，等等
 
-### 3.2 流行的Go开发项目踩坑记
+### 3.2 流行的Go开发项目踩坑记 🔖
 
 #### Docker
 
@@ -1142,19 +1538,37 @@ issue 795
 
 issue 10419
 
-## 4 Mutex：骇客编程，如何拓展额外功能？
+### 总结
+
+
+
+### 思考题
+
+> 查找知名的数据库系统TiDB的issue，看看有没有Mutex相关的issue，看看它们都是哪些相关的Bug。
+
+
+
+## 4 Mutex：骇客编程，如何拓展额外功能？🔖
 
 锁是性能下降的“罪魁祸首”之一，所以，有效地降低锁的竞争，就能够很好地提高性能。因此，监控关键互斥锁上等待的goroutine的数量，是我们分析锁竞争的激烈程度的一个重要指标。
 
+实际上，不论是不希望锁的goroutine继续等待，还是想监控锁，我们都可以基于标准库中Mutex的实现，通过Hacker的方式，为Mutex增加一些额外的功能。这节就实现几个扩展功能，包括实现TryLock，获取等待者的数量等指标，以及实现一个线程安全的队列。
+
 ### 4.1 TryLock
 
-Go 1.18  为Mutex/RWMutex增加了TryLock方法
+> Go 1.18  标准库为Mutex/RWMutex增加了TryLock方法
 
 当一个goroutine调用这个TryLock方法请求锁的时候，如果这把锁没有被其他goroutine所持有，那么，这个goroutine就持有了这把锁，并返回true；如果这把锁已经被其他goroutine所持有，或者是正在准备交给某个被唤醒的goroutine，那么，这个请求锁的goroutine就直接返回false，不会阻塞在方法调用上。
 
+如下图所示，如果Mutex已经被一个goroutine持有，调用Lock的goroutine阻塞排队等待，调用TryLock的goroutine直接得到一个false返回。
+
 ![](images/image-20250320005250024.png)
 
+在实际开发中，如果要更新配置数据，通常需要加锁，这样可以避免同时有多个goroutine并发修改数据。有的时候，也会使用TryLock。这样一来，当某个goroutine想要更改配置数据时，如果发现已经有goroutine在更改了，其他的goroutine调用TryLock，返回了false，这个goroutine就会放弃更改。
 
+很多语言（比如Java）都为锁提供了TryLock的方法，但是，Go官方issue 6123有一个讨论（后来一些issue中也提到过），标准库的Mutex不会添加TryLock方法。
+
+虽然通过Go的Channel我们也可以实现TryLock的功能，但是基于Channel的实现我们会放在Channel那一讲中去介绍，这一次还是基于Mutex去实现，毕竟大部分的程序员还是熟悉传统的同步原语，而且传统的同步原语也不容易出错。
 
 ```go
 // 复制Mutex定义的常量
@@ -1189,15 +1603,52 @@ func (m *Mutex) TryLock() bool {
 }
 ```
 
+第17行是一个fast path，如果幸运，没有其他goroutine争这把锁，那么，这把锁就会被这个请求的goroutine获取，直接返回。
 
+如果锁已经被其他goroutine所持有，或者被其他唤醒的goroutine准备持有，那么，就直接返回false，不再请求，代码逻辑在第23行。
 
+如果没有被持有，也没有其它唤醒的goroutine来竞争锁，锁也不处于饥饿状态，就尝试获取这把锁（第29行），不论是否成功都将结果返回。因为，这个时候，可能还有其他的goroutine也在竞争这把锁，所以，不能保证成功获取这把锁。
 
+写一个简单的测试程序，来测试上面的TryLock的机制是否工作。
 
+```go
+func try() {
+    var mu Mutex
+    go func() { // 启动一个goroutine持有一段时间的锁
+        mu.Lock()
+        time.Sleep(time.Duration(rand.Intn(2)) * time.Second)
+        mu.Unlock()
+    }()
 
+    time.Sleep(time.Second)
+
+    ok := mu.TryLock() // 尝试获取到锁
+    if ok { // 获取成功
+        fmt.Println("got the lock")
+        // do something
+        mu.Unlock()
+        return
+    }
+
+    // 没有获取到
+    fmt.Println("can't get the lock")
+}
+```
+
+这个测试程序的工作机制：程序运行时会启动一个goroutine持有这把我们自己实现的锁，经过随机的时间才释放。主goroutine会尝试获取这把锁。如果前一个goroutine一秒内释放了这把锁，那么，主goroutine就有可能获取到这把锁了，输出“got the lock”，否则没有获取到也不会被阻塞，会直接输出“can't get the lock”。
 
 ### 4.2 获取等待者的数量等指标
 
+```go
+type Mutex struct {
+    state int32
+    sema  uint32
+}
+```
 
+Mutex结构中的state字段有很多个含义，通过state字段，你可以知道锁是否已经被某个goroutine持有、当前是否处于饥饿状态、是否有等待的goroutine被唤醒、等待者的数量等信息。但是，state这个字段并没有暴露出来，所以，需要想办法获取到这个字段，并进行解析。
+
+<u>怎么获取未暴露的字段呢？通过unsafe的方式实现。例子：
 
 ```go
 const (
@@ -1219,11 +1670,91 @@ func (m *Mutex) Count() int {
 }
 ```
 
-🔖
+第14行通过unsafe操作，可以得到state字段的值。
+
+第15行右移三位（这里的常量mutexWaiterShift的值为3），就得到了当前等待者的数量。如果当前的锁已经被其他goroutine持有，那么，就稍微调整一下这个值，加上一个1（第16行），你基本上可以把它看作是当前持有和等待这把锁的goroutine的总数。
+
+state这个字段的第一位是用来标记锁是否被持有，第二位用来标记是否已经唤醒了一个等待者，第三位标记锁是否处于饥饿状态，通过分析这个state字段我们就可以得到这些状态信息。我们可以为这些状态提供查询的方法，这样就可以实时地知道锁的状态了。
+
+```go
+// 锁是否被持有
+func (m *Mutex) IsLocked() bool {
+    state := atomic.LoadInt32((*int32)(unsafe.Pointer(&m.Mutex)))
+    return state&mutexLocked == mutexLocked
+}
+
+// 是否有等待者被唤醒
+func (m *Mutex) IsWoken() bool {
+    state := atomic.LoadInt32((*int32)(unsafe.Pointer(&m.Mutex)))
+    return state&mutexWoken == mutexWoken
+}
+
+// 锁是否处于饥饿状态
+func (m *Mutex) IsStarving() bool {
+    state := atomic.LoadInt32((*int32)(unsafe.Pointer(&m.Mutex)))
+    return state&mutexStarving == mutexStarving
+}
+```
+
+测试程序，比如，在1000个goroutine并发访问的情况下，可以把锁的状态信息输出出来：
+
+```go
+func count() {
+    var mu Mutex
+    for i := 0; i < 1000; i++ { // 启动1000个goroutine
+        go func() {
+            mu.Lock()
+            time.Sleep(time.Second)
+            mu.Unlock()
+        }()
+    }
+
+    time.Sleep(time.Second)
+    // 输出锁的信息
+    fmt.Printf("waitings: %d, isLocked: %t, woken: %t,  starving: %t\n", mu.Count(), mu.IsLocked(), mu.IsWoken(), mu.IsStarving())
+}
+```
+
+注意：在获取state字段的时候，并没有通过Lock获取这把锁，所以获取的这个state的值是一个瞬态的值，可能在你解析出这个字段之后，锁的状态已经发生了变化。不过没关系，因为你查看的就是调用的那一时刻的锁的状态。
 
 ### 4.3 使用Mutex实现一个线程安全的队列
 
+如何使用Mutex实现一个线程安全的队列。
 
+为什么要讨论这个话题呢？因为Mutex经常会和其他非线程安全（对于Go来说，我们其实指的是goroutine安全）的数据结构一起，组合成一个线程安全的数据结构。新数据结构的业务逻辑由原来的数据结构提供，而**Mutex提供了锁的机制，来保证线程安全**。
+
+比如队列，可以通过Slice来实现，但是通过Slice实现的队列不是线程安全的，出队（Dequeue）和入队（Enqueue）会有data race的问题。这个时候，通过Mutex可以在出队和入队的时候加上锁的保护。
+
+```go
+type SliceQueue struct {
+    data []interface{}
+    mu   sync.Mutex
+}
+
+func NewSliceQueue(n int) (q *SliceQueue) {
+    return &SliceQueue{data: make([]interface{}, 0, n)}
+}
+
+// Enqueue 把值放在队尾
+func (q *SliceQueue) Enqueue(v interface{}) {
+    q.mu.Lock()
+    q.data = append(q.data, v)
+    q.mu.Unlock()
+}
+
+// Dequeue 移去队头并返回
+func (q *SliceQueue) Dequeue() interface{} {
+    q.mu.Lock()
+    if len(q.data) == 0 {
+        q.mu.Unlock()
+        return nil
+    }
+    v := q.data[0]
+    q.data = q.data[1:]
+    q.mu.Unlock()
+    return v
+}
+```
 
 
 
@@ -1241,9 +1772,15 @@ Mutex是package sync的基石，其他的一些同步原语也是基于它实现
 
 
 
-## 5 RWMutex：读写锁的实现原理及避坑指南
+## 5 RWMutex：读写锁的实现原理及避坑指南 🔖
 
-只要有一个线程在执行写操作，其它的线程都不能执行读写操作
+不管是读还是写，都通过Mutex来保证只有一个goroutine访问共享资源，这在某些情况下有点“浪费”。比如说，在写少读多的情况下，即使一段时间内没有写操作，大量并发的读访问也不得不在Mutex的保护下变成了串行访问，这个时候，使用Mutex，对性能的影响就比较大。
+
+解决思路就是**区分读写操作**。
+
+如果某个读操作的goroutine持有了锁，在这种情况下，其它读操作的goroutine就不必一直傻傻地等待了，而是可以并发地访问共享变量，这样就可以**将串行的读变成并行读**，提高读操作的性能。当写操作的goroutine持有锁的时候，它就是一个排外锁，其它的写操作和读操作的goroutine，需要阻塞等待持有这个锁的goroutine释放锁。
+
+这一类并发读写问题叫作==readers-writers问题==，意思就是，**同时可能有多个读或者多个写**，但是只要有一个线程在执行写操作，其它的线程都不能执行读写操作。
 
 Go标准库中的`RWMutex`（读写锁）就是用来解决这类**readers-writers问题**的。
 
@@ -1339,13 +1876,67 @@ const rwmutexMaxReaders = 1 << 30
 
 #### RLock/RUnlock的实现
 
+```go
+func (rw *RWMutex) RLock() {
+    if atomic.AddInt32(&rw.readerCount, 1) < 0 {
+            // rw.readerCount是负值的时候，意味着此时有writer等待请求锁，因为writer优先级高，所以把后来的reader阻塞休眠
+        runtime_SemacquireMutex(&rw.readerSem, false, 0)
+    }
+}
+func (rw *RWMutex) RUnlock() {
+    if r := atomic.AddInt32(&rw.readerCount, -1); r < 0 {
+        rw.rUnlockSlow(r) // 有等待的writer
+    }
+}
+func (rw *RWMutex) rUnlockSlow(r int32) {
+    if atomic.AddInt32(&rw.readerWait, -1) == 0 {
+        // 最后一个reader了，writer终于有机会获得锁了
+        runtime_Semrelease(&rw.writerSem, false, 1)
+    }
+}
+```
 
+readerCount这个字段有双重含义：
+
+- 没有writer竞争或持有锁时，readerCount和我们正常理解的reader的计数是一样的；
+- 但是，如果有writer竞争锁或者持有锁时，那么，readerCount不仅仅承担着reader的计数功能，还能够标识当前是否有writer竞争或持有锁，在这种情况下，请求锁的reader的处理进入第4行，阻塞等待锁的释放。
 
 #### Lock
 
 
 
+```go
+func (rw *RWMutex) Lock() {
+    // 首先解决其他writer竞争问题
+    rw.w.Lock()
+    // 反转readerCount，告诉reader有writer竞争锁
+    r := atomic.AddInt32(&rw.readerCount, -rwmutexMaxReaders) + rwmutexMaxReaders
+    // 如果当前有reader持有锁，那么需要等待
+    if r != 0 && atomic.AddInt32(&rw.readerWait, r) != 0 {
+        runtime_SemacquireMutex(&rw.writerSem, false, 0)
+    }
+}
+```
+
+
+
 #### Unlock
+
+
+
+```go
+func (rw *RWMutex) Unlock() {
+    // 告诉reader没有活跃的writer了
+    r := atomic.AddInt32(&rw.readerCount, rwmutexMaxReaders)
+    
+    // 唤醒阻塞的reader们
+    for i := 0; i < int(r); i++ {
+        runtime_Semrelease(&rw.readerSem, false, 0)
+    }
+    // 释放内部的互斥锁
+    rw.w.Unlock()
+}
+```
 
 
 
@@ -1365,13 +1956,19 @@ const rwmutexMaxReaders = 1 << 30
 
 ### 5.4 流行的Go开发项目中的坑
 
+#### Docker issue 36840
 
 
 
+#### Kubernetes issue 62464
 
-
+### 总结
 
 ![](images/image-20250221004031246.png)
+
+### 思考题
+
+> 写一个扩展的读写锁，比如提供TryLock，查询当前是否有writer、reader的数量等方法。
 
 
 
@@ -1383,7 +1980,7 @@ const rwmutexMaxReaders = 1 << 30
 
 > 使用WaitGroup的场景:
 >
-> 比如，我们要完成一个大的任务，需要使用并行的goroutine执行三个小任务，只有这三个小任务都完成，我们才能去执行后面的任务。如果通过轮询的方式定时询问三个小任务是否完成，会存在两个问题：一是，性能比较低，因为三个小任务可能早就完成了，却要等很长时间才被轮询到；二是，会有很多无谓的轮询，空耗CPU资源。
+> 比如，我们要完成一个大的任务，需要使用并行的goroutine执行三个小任务，只有这三个小任务都完成，才能去执行后面的任务。如果通过轮询的方式定时询问三个小任务是否完成，会存在两个问题：一是，性能比较低，因为三个小任务可能早就完成了，却要等很长时间才被轮询到；二是，会有很多无谓的轮询，空耗CPU资源。
 >
 > 那么，这个时候使用WaitGroup并发原语就比较有效了，它可以阻塞等待的goroutine。等到三个小任务都完成了，再即时唤醒它们。
 
@@ -1440,11 +2037,19 @@ func main() {
 }
 ```
 
+- 第28行，声明了一个WaitGroup变量，初始值为零。
+- 第29行，把WaitGroup变量的计数值设置为10。因为我们需要编排10个goroutine(worker)去执行任务，并且等待goroutine完成。
+- 第35行，调用Wait方法阻塞等待。
+- 第32行，启动了goroutine，并把我们定义的WaitGroup指针当作参数传递进去。goroutine完成后，需要调用Done方法，把WaitGroup的计数值减1。等10个goroutine都调用了Done方法后，WaitGroup的计数值降为0，这时，第35行的主goroutine就不再阻塞，会继续执行，在第37行输出计数值。
 
+这就是使用WaitGroup编排这类任务的常用方式。而“这类任务”指的就是，**需要启动多个goroutine执行任务，主goroutine需要等待子goroutine都完成后才继续执行**。
 
 ### 6.2 WaitGroup的实现
 
+`WaitGroup`包括了一个noCopy的辅助字段，一个state1记录WaitGroup状态的数组。
 
+- noCopy的辅助字段，主要就是辅助vet工具检查是否通过copy赋值这个WaitGroup实例。我会在后面和你详细分析这个字段；
+- state1，一个具有复合意义的字段，包含WaitGroup的计数、阻塞在检查点的waiter数和信号量。
 
 ```go
 type WaitGroup struct {
@@ -1478,19 +2083,206 @@ func (wg *WaitGroup) state() (statep *uint64, semap *uint32) {
 
 ![](images/image-20250322203404644.png)
 
+Add、Done和Wait源码实现中，还会有一些额外的代码，主要是race检查和异常检查的代码。其中，有几个检查非常关键，如果检查不通过，会出现panic【下一个小节】。
 
+**Add方法**主要操作的是state的计数部分。可以为计数值增加一个delta值，内部通过原子操作把这个值加到计数值上。
+
+需要注意的是，这个delta也可以是个负数，相当于为计数值减去一个值，**Done方法**内部其实就是通过Add(-1)实现的。
+
+```go
+func (wg *WaitGroup) Add(delta int) {
+    statep, semap := wg.state()
+    // 高32bit是计数值v，所以把delta左移32，增加到计数上
+    state := atomic.AddUint64(statep, uint64(delta)<<32)
+    v := int32(state >> 32) // 当前计数值
+    w := uint32(state) // waiter count
+
+    if v > 0 || w == 0 {
+        return
+    }
+
+    // 如果计数值v为0并且waiter的数量w不为0，那么state的值就是waiter的数量
+    // 将waiter的数量设置为0，因为计数值v也是0,所以它们俩的组合*statep直接设置为0即可。此时需要并唤醒所有的waiter
+    *statep = 0
+    for ; w != 0; w-- {
+        runtime_Semrelease(semap, false, 0)
+    }
+}
+
+
+// Done方法实际就是计数器减1
+func (wg *WaitGroup) Done() {
+    wg.Add(-1)
+}
+```
+
+Wait方法的实现逻辑是：不断检查state的值。如果其中的计数值变为了0，那么说明所有的任务已完成，调用者不必再等待，直接返回。如果计数值大于0，说明此时还有任务没完成，那么调用者就变成了等待者，需要加入waiter队列，并且阻塞住自己。
+
+```go
+func (wg *WaitGroup) Wait() {
+    statep, semap := wg.state()
+    
+    for {
+        state := atomic.LoadUint64(statep)
+        v := int32(state >> 32) // 当前计数值
+        w := uint32(state) // waiter的数量
+        if v == 0 {
+            // 如果计数值为0, 调用这个方法的goroutine不必再等待，继续执行它后面的逻辑即可
+            return
+        }
+        // 否则把waiter数量加1。期间可能有并发调用Wait的情况，所以最外层使用了一个for循环
+        if atomic.CompareAndSwapUint64(statep, state, state+1) {
+            // 阻塞休眠等待
+            runtime_Semacquire(semap)
+            // 被唤醒，不再阻塞，返回
+            return
+        }
+    }
+}
+```
 
 ### 6.3 使用WaitGroup时的常见错误
 
+在分析WaitGroup的Add、Done和Wait方法的实现的时候，为避免干扰，删除了异常检查的代码。但是，这些异常检查非常有用。
+
+在开发的时候，经常会遇见或看到误用WaitGroup的场景，究其原因就是没有弄明白这些检查的逻辑。
+
 #### 常见问题一：计数器设置为负值
+
+WaitGroup的计数器的值必须大于等于0。在更改这个计数值的时候，WaitGroup会先做检查，如果计数值被设置为负数，就会导致panic。
+
+两种方法会导致计数器设置为负数。
+
+- 第一种方法是：**调用Add的时候传递一个负数**。
+
+```go
+func main() {
+    var wg sync.WaitGroup
+    wg.Add(10)
+
+    wg.Add(-10)//将-10作为参数调用Add，计数值被设置为0
+
+    wg.Add(-1)//将-1作为参数调用Add，如果加上-1计数值就会变为负数。这是不对的，所以会触发panic
+}
+```
+
+- 第二个方法是：**调用Done方法的次数过多，超过了WaitGroup的计数值。**
+
+**使用WaitGroup的正确姿势是，预先确定好WaitGroup的计数值，然后调用相同次数的Done完成相应的任务。**比如，在WaitGroup变量声明之后，就立即设置它的计数值，或者在goroutine启动之前增加1，然后在goroutine中调用Done。
+
+如果你没有遵循这些规则，就很可能会导致Done方法调用的次数和计数值不一致，进而造成死锁（Done调用次数比计数值少）或者panic（Done调用次数比计数值多）。
+
+```go
+ func main() {
+    var wg sync.WaitGroup
+    wg.Add(1)
+
+    wg.Done()
+
+    wg.Done()
+}
+```
 
 
 
 #### 常见问题二：不期望的Add时机
 
+原则：**等所有的Add方法调用之后再调用Wait**，否则就可能导致panic或者不期望的结果。
 
+```go
+func main() {
+    var wg sync.WaitGroup
+    go dosomething(100, &wg) // 启动第一个goroutine
+    go dosomething(110, &wg) // 启动第二个goroutine
+    go dosomething(120, &wg) // 启动第三个goroutine
+    go dosomething(130, &wg) // 启动第四个goroutine
+
+    wg.Wait() // 主goroutine等待完成
+    fmt.Println("Done")
+}
+
+func dosomething(millisecs time.Duration, wg *sync.WaitGroup) {
+    duration := millisecs * time.Millisecond
+    time.Sleep(duration) // 故意sleep一段时间
+
+    wg.Add(1)
+    fmt.Println("后台执行, duration:", duration)
+    wg.Done()
+}
+```
+
+
+
+解决方法一是**预先设置计数值**：
+
+```go
+func main() {
+    var wg sync.WaitGroup
+    wg.Add(4) // 预先设定WaitGroup的计数值
+
+    go dosomething(100, &wg) // 启动第一个goroutine
+    go dosomething(110, &wg) // 启动第二个goroutine
+    go dosomething(120, &wg) // 启动第三个goroutine
+    go dosomething(130, &wg) // 启动第四个goroutine
+
+    wg.Wait() // 主goroutine等待
+    fmt.Println("Done")
+}
+
+func dosomething(millisecs time.Duration, wg *sync.WaitGroup) {
+    duration := millisecs * time.Millisecond
+    time.Sleep(duration)
+
+    fmt.Println("后台执行, duration:", duration)
+    wg.Done()
+}
+```
+
+解决方法二是在启动子goroutine之前才调用Add：
+
+```go
+func main() {
+    var wg sync.WaitGroup
+
+    dosomething(100, &wg) // 调用方法，把计数值加1，并启动任务goroutine
+    dosomething(110, &wg) // 调用方法，把计数值加1，并启动任务goroutine
+    dosomething(120, &wg) // 调用方法，把计数值加1，并启动任务goroutine
+    dosomething(130, &wg) // 调用方法，把计数值加1，并启动任务goroutine
+
+    wg.Wait() // 主goroutine等待，代码逻辑保证了四次Add(1)都已经执行完了
+    fmt.Println("Done")
+}
+
+func dosomething(millisecs time.Duration, wg *sync.WaitGroup) {
+    wg.Add(1) // 计数值加1，再启动goroutine
+
+    go func() {
+        duration := millisecs * time.Millisecond
+        time.Sleep(duration)
+        fmt.Println("后台执行, duration:", duration)
+        wg.Done()
+    }()
+}
+```
+
+可见，无论是怎么修复，都要保证所有的Add方法是在Wait方法之前被调用的。
 
 #### 常见问题三：前一个Wait还没结束就重用WaitGroup
+
+
+
+```go
+func main() {
+    var wg sync.WaitGroup
+    wg.Add(1)
+    go func() {
+        time.Sleep(time.Millisecond)
+        wg.Done() // 计数器减1
+        wg.Add(1) // 计数值加1
+    }()
+    wg.Wait() // 主goroutine等待，有可能和第7行并发执行
+}
+```
 
 
 
@@ -1504,13 +2296,41 @@ func (wg *WaitGroup) state() (statep *uint64, semap *uint32) {
 
 ### 6.5 流行的Go开发项目中的坑
 
+Go的issue 28123
 
 
 
+Docker issue 28161 和 issue 27011
+
+Etcd issue 6534
+
+
+
+Kubernetes issue 59574 
+
+
+
+go issue 12813
+
+### 总结
+
+避免错误使用WaitGroup只需要尽量保证下面5点就可以了：
+
+- 不重用WaitGroup。新建一个WaitGroup不会带来多大的资源开销，重用反而更容易出错。
+- 保证所有的Add方法调用都在Wait之前。
+- 不传递负数给Add方法，只通过Done来给计数值减1。
+- 不做多余的Done方法调用，保证Add的计数值和Done方法调用的数量是一样的。
+- 不遗漏Done方法的调用，否则会导致Wait hang住无法返回。
 
 
 
 ![](images/image-20250221004119175.png)
+
+### 思考题
+
+> 通常我们可以把WaitGroup的计数值，理解为等待要完成的waiter的数量。你可以试着扩展下WaitGroup，来查询WaitGroup的当前的计数值吗？
+
+
 
 ## 7 Cond：条件变量的实现机制及避坑指南
 
@@ -1518,7 +2338,15 @@ func (wg *WaitGroup) state() (statep *uint64, semap *uint32) {
 >
 > 请实现一个限定容量的队列（queue），当队列满或者空的时候，利用等待/通知机制实现阻塞或者唤醒。
 
-### Cond的基本用法
+在Go中，也可以实现一个类似的限定容量的队列，而且实现起来也比较简单，只要用条件变量（Cond）并发原语就可以。Cond并发原语相对来说不是那么常用，但是在特定的场景使用会事半功倍，比如你需要在唤醒一个或者所有的等待者做一些检查操作的时候。
+
+### 7.1 Go标准库的Cond
+
+Go标准库提供Cond原语的目的是，**为等待/通知场景下的并发问题提供支持**。
+
+Cond通常应用于等待某个条件的一组goroutine，等条件变为true的时候，其中一个goroutine或者所有的goroutine都会被唤醒执行
+
+### 7.2 Cond的基本用法
 
 ```go
 type Cond
@@ -1532,13 +2360,61 @@ func (c *Cond) Wait()
 - Broadcast方法，允许调用者Caller唤醒所有等待此Cond的goroutine。如果此时没有等待的goroutine，显然无需通知waiter；如果Cond等待队列中有一个或者多个等待的goroutine，则清空所有等待的goroutine，并全部唤醒。在其他编程语言中，比如Java语言中，Broadcast方法也被叫做notifyAll方法。同样地，调用Broadcast方法时，也不强求你一定持有c.L的锁。
 - Wait方法，会把调用者Caller放入Cond的等待队列中并阻塞，直到被Signal或者Broadcast的方法从等待队列中移除并唤醒
 
+调用Wait方法时必须要持有c.L的锁。
 
+Go实现的sync.Cond的方法名是Wait、Signal和Broadcast，这是计算机科学中条件变量的通用方法名。比如，C语言中对应的方法名是`pthread_cond_wait`、`pthread_cond_signal`和 `pthread_cond_broadcast`。
 
-> Go实现的sync.Cond的方法名是Wait、Signal和Broadcast，这是计算机科学中条件变量的通用方法名。比如，C语言中对应的方法名是pthread_cond_wait、pthread_cond_signal和 pthread_cond_broadcast。
+🌰
 
+10个运动员进入赛场之后需要先做拉伸活动活动筋骨，向观众和粉丝招手致敬，在自己的赛道上做好准备；等所有的运动员都准备好之后，裁判员才会打响发令枪。
 
+每个运动员做好准备之后，将ready加一，表明自己做好准备了，同时调用Broadcast方法通知裁判员。因为裁判员只有一个，所以这里可以直接替换成Signal方法调用。调用Broadcast方法的时候，我们并没有请求c.L锁，只是在更改等待变量的时候才使用到了锁。
 
-### Cond的实现原理
+裁判员会等待运动员都准备好（第22行）。虽然每个运动员准备好之后都唤醒了裁判员，但是裁判员被唤醒之后需要检查等待条件是否满足（运动员都准备好了）。可以看到，裁判员被唤醒之后一定要检查等待条件，如果条件不满足还是要继续等待。
+
+```go
+func main() {
+    c := sync.NewCond(&sync.Mutex{})
+    var ready int
+
+    for i := 0; i < 10; i++ {
+        go func(i int) {
+            time.Sleep(time.Duration(rand.Int63n(10)) * time.Second)
+
+            // 加锁更改等待条件
+            c.L.Lock()
+            ready++
+            c.L.Unlock()
+
+            log.Printf("运动员#%d 已准备就绪\n", i)
+            // 广播唤醒所有的等待者
+            c.Broadcast()
+        }(i)
+    }
+
+    c.L.Lock()
+    for ready != 10 {
+        c.Wait()
+        log.Println("裁判员被唤醒一次")
+    }
+    c.L.Unlock()
+
+    //所有的运动员是否就绪
+    log.Println("所有运动员都准备就绪。比赛开始，3，2，1, ......")
+}
+```
+
+Cond的使用其实没那么简单。它的复杂在于：
+
+- 一，这段代码有时候需要加锁，有时候可以不加；
+- 二，Wait唤醒后需要检查条件；
+- 三，条件变量的更改，其实是需要原子操作或者互斥锁保护的。
+
+所以，有的开发者会认为，Cond是唯一难以掌握的Go并发原语。
+
+### 7.1 Cond的实现原理
+
+Cond的实现非常简单，或者说复杂的逻辑已经被Locker或者runtime的等待队列实现了。
 
 ```go
 type Cond struct {
@@ -1577,43 +2453,239 @@ func (c *Cond) Broadcast() {
 }
 ```
 
+- runtime_notifyListXXX是运行时实现的方法，实现了一个等待/通知的队列。【深入 -> runtime/sema.go】
+- copyChecker是一个辅助结构，可以在运行时检查Cond是否被复制使用。
+- Signal和Broadcast只涉及到notifyList数据结构，不涉及到锁。
+- Wait把调用者加入到等待队列时会释放锁，在被唤醒之后还会请求锁。在阻塞休眠期间，调用者是不持有锁的，这样能让其他goroutine有机会检查或者更新等待变量。
 
-
-### 使用Cond的2个常见错误
+### 7.3 使用Cond的2个常见错误
 
 - 调用Wait的时候没有加锁。
+
+以前面百米赛跑的程序为例，在调用cond.Wait时，把前后的Lock/Unlock注释掉，如下面的代码中的第20行和第25行：
+
+```go
+func main() {
+    c := sync.NewCond(&sync.Mutex{})
+    var ready int
+
+    for i := 0; i < 10; i++ {
+        go func(i int) {
+            time.Sleep(time.Duration(rand.Int63n(10)) * time.Second)
+
+            // 加锁更改等待条件
+            c.L.Lock()
+            ready++
+            c.L.Unlock()
+
+            log.Printf("运动员#%d 已准备就绪\n", i)
+            // 广播唤醒所有的等待者
+            c.Broadcast()
+        }(i)
+    }
+
+    // c.L.Lock()
+    for ready != 10 {
+        c.Wait()
+        log.Println("裁判员被唤醒一次")
+    }
+    // c.L.Unlock()
+
+    //所有的运动员是否就绪
+    log.Println("所有运动员都准备就绪。比赛开始，3，2，1, ......")
+}
+```
 
 
 
 - 只调用了一次Wait，没有检查等待条件是否满足，结果条件没满足，程序就继续执行了。
 
+```go
+func main() {
+    c := sync.NewCond(&sync.Mutex{})
+    var ready int
+
+    for i := 0; i < 10; i++ {
+        go func(i int) {
+            time.Sleep(time.Duration(rand.Int63n(10)) * time.Second)
+
+            // 加锁更改等待条件
+            c.L.Lock()
+            ready++
+            c.L.Unlock()
+
+            log.Printf("运动员#%d 已准备就绪\n", i)
+            // 广播唤醒所有的等待者
+            c.Broadcast()
+        }(i)
+    }
+
+    c.L.Lock()
+    // for ready != 10 {
+    c.Wait()
+    log.Println("裁判员被唤醒一次")
+    // }
+    c.L.Unlock()
+
+    //所有的运动员是否就绪
+    log.Println("所有运动员都准备就绪。比赛开始，3，2，1, ......")
+}
+```
 
 
-### 知名项目中Cond的使用
+
+### 7.1 知名项目中Cond的使用
 
 
 
-
+### 总结
 
 ![](images/image-20250221004156640.png)
+
+### 思考题
+
+> 一个Cond的waiter被唤醒的时候，为什么需要再检查等待条件，而不是唤醒后进行下一步？
+
+
+
+
+
+>  你能否利用Cond实现一个容量有限的queue
+
+
+
+
 
 ## 8 Once：一个简约而不简单的并发原语
 
 Once可以用来执行且仅仅执行一次动作，常常用于单例对象的初始化场景。
 
-### Once的使用场景
+初始化单例资源有很多方法，比如定义package级别的变量，这样程序在启动的时候就可以初始化1️⃣：
+
+```go
+package abc
+
+import time
+
+var startTime = time.Now()
+```
+
+或者在init函数中进行初始化：2️⃣
+
+```go
+package abc
+
+var startTime time.Time
+
+func init() {
+  startTime = time.Now()
+}
+```
+
+又或者在main函数开始执行的时候，执行一个初始化的函数：3️⃣
+
+```go
+package abc
+
+var startTime time.Tim
+
+func initApp() {
+    startTime = time.Now()
+}
+func main() {
+  initApp()
+}
+```
+
+这三种方法都是线程安全的，并且后两种方法还可以根据传入的参数实现定制化的初始化操作。
+
+但是很多时候是要**延迟进行初始化的**，所以有时候单例资源的初始化，会使用下面的方法：
+
+```go
+package main
+
+import (
+    "net"
+    "sync"
+    "time"
+)
+
+// 使用互斥锁保证线程(goroutine)安全
+var connMu sync.Mutex
+var conn net.Conn
+
+func getConn() net.Conn {
+    connMu.Lock()
+    defer connMu.Unlock()
+
+    // 返回已创建好的连接
+    if conn != nil {
+        return conn
+    }
+
+    // 创建连接
+    conn, _ = net.DialTimeout("tcp", "baidu.com:80", 10*time.Second)
+    return conn
+}
+
+// 使用连接
+func main() {
+    conn := getConn()
+    if conn == nil {
+        panic("conn is nil")
+    }
+}
+```
+
+这种方式虽然实现起来简单，但是有性能问题。一旦连接创建好，每次请求的时候还是得竞争锁才能读取到这个连接，这是比较浪费资源的，因为连接如果创建好之后，其实就不需要锁的保护了。怎么办呢？`Once`
+
+### 8.1 Once的使用场景
+
+**sync.Once只暴露了一个方法Do，可以多次调用Do方法，但是只有第一次调用Do方法时f参数才会执行，这里的f是一个无参数无返回值的函数。**
+
+```go
+func (o *Once) Do(f func())
+```
+
+因为当且仅当第一次调用Do方法的时候参数f才会执行，即使第二次、第三次、第n次调用时f参数的值不一样，也不会被执行，比如下面的例子，虽然f1和f2是不同的函数，但是第二个函数f2就不会执行。
+
+```go
+package main
+
+
+import (
+    "fmt"
+    "sync"
+)
+
+func main() {
+    var once sync.Once
+
+    // 第一个初始化函数
+    f1 := func() {
+        fmt.Println("in f1")
+    }
+    once.Do(f1) // 打印出 in f1
+
+    // 第二个初始化函数
+    f2 := func() {
+        fmt.Println("in f2")
+    }
+    once.Do(f2) // 无输出
+}
+```
+
+🔖
+
+### 8.2 如何实现一个Once？
 
 
 
-
-
-### 如何实现一个Once？
-
+一个正确的Once实现要使用一个互斥锁，这样初始化的时候如果有并发的goroutine，就会进入doSlow方法。
 
 
 
-
-### 使用Once可能出现的2种错误
+### 8.3 使用Once可能出现的2种错误
 
 #### 1️⃣死锁
 
@@ -1623,33 +2695,161 @@ Once可以用来执行且仅仅执行一次动作，常常用于单例对象的�
 
 
 
-### Once的踩坑案例
+### 8.4 Once的踩坑案例
+
+
+
+### 总结
+
+Once的应用场景还是很广泛的。**一旦遇到只需要初始化一次的场景，首先想到的就应该是Once并发原语**。
+
+
 
 ![](images/image-20250221004227693.png)
 
 
 
+### 思考题
+
+> 我已经分析了几个并发原语的实现，你可能注意到总是有些slowXXXX的方法，从XXXX方法中单独抽取出来，你明白为什么要这么做吗，有什么好处？
+
+
+
+> Once在第一次使用之后，还能复制给其它变量使用吗？
+
+
+
 ## 9 map：如何实现线程安全的map类型？
 
+**哈希表（Hash Table）**实现的就是key-value之间的映射关系，主要提供的方法包括Add、Lookup、Delete等。
 
+因为这种数据结构是一个基础的数据结构，每个key都会有一个唯一的索引值，通过索引可以很快地找到对应的值，所以使用哈希表进行数据的插入和读取都是很快的。Go语言本身就内建了这样一个数据结构，也就是`map`数据类型。
+
+### 9.1 map的基本使用方法
+
+```go
+map[K]V
+```
+
+**key类型的K必须是==可比较的（comparable）==**，也就是可以通过 == 和 !=操作符进行比较；value的值和类型无所谓，可以是任意的类型，或者为nil。
+
+在Go语言中，bool、整数、浮点数、复数、字符串、指针、Channel、接口都是可比较的，包含可比较元素的struct和数组，这俩也是可比较的，而slice、map、函数值都是不可比较的。
+
+不是所有可比较的数据类型都可以作为map的key的。通常情况下，会选择内建的基本类型，比如整数、字符串做key的类型，因为这样最方便。
+
+如果使用struct类型做key其实是有坑的，因为如果struct的某个字段值修改了，查询map时无法获取它add进去的值，如下面的例子：
+
+```go
+type mapKey struct {
+    key int
+}
+
+func main() {
+    var m = make(map[mapKey]string)
+    var key = mapKey{10}
+
+
+    m[key] = "hello"
+    fmt.Printf("m[key]=%s\n", m[key])
+
+
+    // 修改key的字段的值后再次查询map，无法获取刚才add进去的值
+    key.key = 100
+    fmt.Printf("再次查询m[key]=%s\n", m[key])
+}
+```
+
+如果要使用struct作为key，我们要保证struct对象在逻辑上是不可变的，这样才会保证map的逻辑没有问题。
+
+🔖
+
+
+
+### 9.2 使用map的2种常见错误
+
+#### 常见错误一：未初始化
+
+
+
+#### 常见错误二：并发读写
+
+
+
+### 9.3 如何实现线程安全的map类型？
+
+#### 加读写锁：扩展map，支持并发读写
+
+
+
+#### 分片加锁：更高效的并发map
+
+
+
+
+
+### 9.4 应对特殊场景的sync.Map
+
+
+
+#### sync.Map的实现
+
+
+
+Store方法
+
+
+
+Load方法
+
+
+
+Delete方法
+
+
+
+### 总结
 
 ![](images/image-20250221004310764.png)
 
 
 
+### 思考题
+
+> 为什么sync.Map中的集合核心方法的实现中，如果read中项目不存在，加锁后还要双检查，再检查一次read？
+
+
+
+> 你看到sync.map元素删除的时候只是把它的值设置为nil，那么什么时候这个key才会真正从map对象中删除？
+
+
+
+
+
 ## 10 Pool：性能提升大杀器
 
-### sync.Pool的特点
+Go是一个自动垃圾回收的编程语言，采用**三色并发标记算法**标记对象并回收。
+
+**如果想使用Go开发一个高性能的应用程序的话，就必须考虑垃圾回收给性能带来的影响**，毕竟，Go的自动垃圾回收机制还是有一个STW（stop-the-world，程序暂停）的时间，而且，大量地创建在堆上的对象，也会影响垃圾回收标记的时间。
+
+所以，一般我们做性能优化的时候，会采用对象池的方式，**把不用的对象回收起来**，避免被垃圾回收掉，这样使用的时候就不必在堆上重新创建了。
+
+不止如此，像**数据库连接、TCP的长连接**，这些连接在创建的时候是一个非常耗时的操作。如果每次都创建一个新的连接对象，耗时较长，很可能整个业务的大部分耗时都花在了创建连接上。
+
+🔖
+
+### 10.1 sync.Pool的特点
 
 
 
 
 
-### sync.Pool的使用方法
+### 10.2 sync.Pool的使用方法
+
+提供了三个对外的方法：New、Get和Put。
 
 
 
-### 实现原理
+### 10.3 实现原理
 
 
 
@@ -1657,17 +2857,107 @@ Once可以用来执行且仅仅执行一次动作，常常用于单例对象的�
 
 
 
+### 10.4 sync.Pool的坑
 
+#### 内存泄漏
+
+
+
+#### 内存浪费
+
+
+
+### 10.5 第三方库
+
+#### [bytebufferpool](https://pkg.go.dev/github.com/valyala/bytebufferpool)
+
+这是fasthttp作者valyala提供的一个buffer池，基本功能和sync.Pool相同。它的底层也是使用sync.Pool实现的，包括会检测最大的buffer，超过最大尺寸的buffer，就会被丢弃。
+
+valyala一向很擅长挖掘系统的性能，这个库也不例外。它提供了校准（calibrate，用来动态调整创建元素的权重）的机制，可以“智能”地调整Pool的defaultSize和maxSize。一般来说，我们使用buffer size的场景比较固定，所用buffer的大小会集中在某个范围里。有了校准的特性，bytebufferpool就能够偏重于创建这个范围大小的buffer，从而节省空间。
+
+#### [oxtoacart/bpool](https://pkg.go.dev/github.com/oxtoacart/bpool)
+
+提供了以下几种类型的buffer。
+
+- bpool.BufferPool： 提供一个固定元素数量的buffer 池，元素类型是bytes.Buffer，如果超过这个数量，Put的时候就丢弃，如果池中的元素都被取光了，会新建一个返回。Put回去的时候，不会检测buffer的大小。
+- bpool.BytesPool：提供一个固定元素数量的byte slice池，元素类型是byte slice。Put回去的时候不检测slice的大小。
+- bpool.SizedBufferPool： 提供一个固定元素数量的buffer池，如果超过这个数量，Put的时候就丢弃，如果池中的元素都被取光了，会新建一个返回。Put回去的时候，会检测buffer的大小，超过指定的大小的话，就会创建一个新的满足条件的buffer放回去。
+
+bpool最大的特色就是能够保持池子中元素的数量，一旦Put的数量多于它的阈值，就会自动丢弃，而sync.Pool是一个没有限制的池子，只要Put就会收进去。
+
+bpool是基于Channel实现的，不像sync.Pool为了提高性能而做了很多优化，所以，在性能上比不过sync.Pool。不过，它提供了限制Pool容量的功能，所以，如果你想控制Pool的容量的话，可以考虑这个库。
+
+### 连接池
+
+
+
+
+
+### Worker Pool
+
+
+
+### 总结
 
 ![](images/image-20250221004351153.png)
+
+### 思考题
+
+> 在标准库net/rpc包中，Server端需要解析大量客户端的请求（Request），这些短暂使用的Request是可以重用的。请你检查相关的代码，看看Go开发者都使用了什么样的方式来重用这些对象。
 
 
 
 ## 11 Context：信息穿透上下文
 
+### 11.1 Context的来历
+
+
+
+### 11.2 Context基本使用方法
+
+Context的具体实现包括4个方法，分别是Deadline、Done、Err和Value：
+
+```go
+type Context interface {
+    Deadline() (deadline time.Time, ok bool)
+    Done() <-chan struct{}
+    Err() error
+    Value(key interface{}) interface{}
+}
+```
+
+- Deadline方法会返回这个Context被取消的截止日期。如果没有设置截止日期，ok的值是false。后续每次调用这个对象的Deadline方法时，都会返回和第一次调用相同的结果。
+
+- Done方法返回一个Channel对象。在Context被取消时，此Channel会被close，如果没被取消，可能会返回nil。后续的Done调用总是返回相同的结果。当Done被close的时候，你可以通过ctx.Err获取错误信息。Done这个方法名其实起得并不好，因为名字太过笼统，不能明确反映Done被close的原因，因为cancel、timeout、deadline都可能导致Done被close，不过，目前还没有一个更合适的方法名称。
+
+  关于Done方法，你必须要记住的知识点就是：如果Done没有被close，Err方法返回nil；如果Done被close，Err方法会返回Done被close的原因。
+
+- Value返回此ctx中和指定的key相关联的value。
+
+Context中实现了2个常用的生成顶层Context的方法。
+
+- context.Background()：返回一个非nil的、空的Context，没有任何值，不会被cancel，不会超时，没有截止日期。一般用在主函数、初始化、测试以及创建根Context的时候。
+- context.TODO()：返回一个非nil的、空的Context，没有任何值，不会被cancel，不会超时，没有截止日期。当你不清楚是否该用Context，或者目前还不知道要传递一些什么上下文信息的时候，就可以使用这个方法。
+
+
+
+
+
+### 11.3 创建特殊用途Context的方法
+
+
+
+
+
+### 总结
+
 
 
 ![](images/image-20250221004459539.png)
+
+### 思考题
+
+> 使用WithCancel和WithValue写一个级联的使用Context的例子，验证一下parent Context被cancel后，子conext是否也立刻被cancel了。
 
 
 
@@ -1677,9 +2967,160 @@ Go标准库中提供的原子操作。==原子操作是其它并发原语的基�
 
 ## 12 atomic：要保证原子操作，一定要使用这几种方法
 
+### 12.1 原子操作的基础知识
+
+`sync/atomic`实现了同步算法底层的原子的内存操作原语，叫做**原子操作原语**，它提供了一些实现原子操作的方法。
+
+CPU 提供了基础的原子操作，不过，**不同架构的系统的原子操作是不一样的**。
+
+对于**单处理器单核系统**来说，如果一个操作是由一个 CPU 指令来实现的，那么它就是原子操作，比如它的 `XCHG` 和 `INC` 等指令。如果操作是基于多条指令来实现的，那么，执行的过程中可能会被中断，并执行上下文切换，这样的话，原子性的保证就被打破了，因为这个时候，操作可能只执行了一半。
+
+在**多处理器多核系统**中，原子操作的实现就比较复杂了。
+
+由于 cache 的存在，单个核上的单个指令进行原子操作的时候，你要确保其它处理器或者核不访问此原子操作的地址，或者是确保其它处理器或者核总是访问原子操作之后的最新的值。x86 架构中提供了指令前缀 `LOCK`，LOCK 保证了指令（比如 LOCK CMPXCHG op1、op2）不会受其它处理器或 CPU 核的影响，有些指令（比如 XCHG）本身就提供 Lock 的机制。不同的 CPU 架构提供的原子操作指令的方式也是不同的，比如对于多核的 `MIPS` 和 `ARM`，提供了 `LL/SC`（Load Link/Store Conditional）指令，可以帮助实现原子操作（ARMLL/SC 指令 LDREX 和 STREX）。
+
+因为不同的 CPU 架构甚至不同的版本提供的原子操作的指令是不同的，所以，要用一种编程语言实现支持不同架构的原子操作是相当有难度的。不过，还好这些都不需要你操心，因为 **Go 提供了一个通用的原子操作的 API**，将更底层的不同的架构下的实现封装成 `atomic` 包，提供了修改类型的原子操作（==atomic read-modify-write，RMW==）和加载存储类型的原子操作（`Load` 和 `Store`）的 API。
+
+有的代码也会因为架构的不同而不同。有时看起来貌似一个操作是原子操作，但实际上，对于不同的架构来说，情况是不一样的。比如下面的代码的第 4 行，是将一个 64 位的值赋值给变量 i：
+
+```go
+const x int64 = 1 + 1<<33
+
+func main() {
+    var i = x
+    _ = i
+}
+```
+
+如果你使用 GOARCH=386 的架构去编译这段代码，那么，第 5 行其实是被拆成了两个指令，分别操作低 32 位和高 32 位（使用 GOARCH=386 go tool compile -N -l test.go；GOARCH=386 go tool objdump -gnu test.o 反编译试试）：
+
+![](images/NeatReader-1750408292526.png)
+
+如果 GOARCH=amd64 的架构去编译这段代码，那么，第 5 行其中的赋值操作其实是一条指令：
+
+![](images/NeatReader-1750408351699.png)
+
+所以，**如果要想保证原子操作，切记一定要使用 atomic 提供的方法**。
+
+### 12.2 atomic原子操作的应用场景
+
+
+
+### 12.3 atomic提供的方法
+
+目前的 Go 的泛型的特性还没有发布，Go 的标准库中的很多实现会显得非常啰嗦，多个类型会实现很多类似的方法，尤其是 atomic 包，最为明显。相信泛型支持之后，atomic 的 API 会清爽很多。
+
+atomic 为了支持 int32、int64、uint32、uint64、uintptr、Pointer（Add 方法不支持）类型，分别提供了 AddXXX、CompareAndSwapXXX、SwapXXX、LoadXXX、StoreXXX 等方法。不过，你也不要担心，你只要记住了一种数据类型的方法的意义，其它数据类型的方法也是一样的。
+
+关于 atomic，还有一个地方你一定要记住，**atomic 操作的对象是一个地址，你需要把可寻址的变量的地址作为参数传递给方法，而不是把变量的值传递给方法**。
+
+#### Add
+
+![=](images/image-20250620163739438.png)
+
+其实，Add 方法就是给第一个参数地址中的值增加一个 delta 值。
+
+
+
+
+
+#### CAS （CompareAndSwap）
+
+
+
+![](images/image-20250620163933737.png)
+
+
+
+#### Swap
+
+
+
+![](images/image-20250620163957292.png)
+
+
+
+#### Load
+
+Load 方法会取出 addr 地址中的值，即使在多处理器、多核、有 CPU cache 的情况下，这个操作也能保证 Load 是一个原子操作。
+
+![](images/image-20250620164027047.png)
+
+#### Store
+
+Store 方法会把一个值存入到指定的 addr 地址中，即使在多处理器、多核、有 CPU cache 的情况下，这个操作也能保证 Store 是一个原子操作。别的 goroutine 通过 Load 读取出来，不会看到存取了一半的值。
+
+![](images/image-20250620164055534.png)
+
+#### Value类型
+
+tomic 还提供了一个特殊的类型：Value。它可以原子地存取对象类型，但也只能存取，不能 CAS 和 Swap，常常用在配置变更等场景中。
+
+![](images/image-20250620164208767.png)
+
+```go
+type Config struct {
+    NodeName string
+    Addr     string
+    Count    int32
+}
+
+func loadNewConfig() Config {
+    return Config{
+        NodeName: "北京",
+        Addr:     "10.77.95.27",
+        Count:    rand.Int31(),
+    }
+}
+func main() {
+    var config atomic.Value
+    config.Store(loadNewConfig())
+    var cond = sync.NewCond(&sync.Mutex{})
+
+    // 设置新的config
+    go func() {
+        for {
+            time.Sleep(time.Duration(5+rand.Int63n(5)) * time.Second)
+            config.Store(loadNewConfig())
+            cond.Broadcast() // 通知等待着配置已变更
+        }
+    }()
+
+    go func() {
+        for {
+            cond.L.Lock()
+            cond.Wait()                 // 等待变更信号
+            c := config.Load().(Config) // 读取新的配置
+            fmt.Printf("new config: %+v\n", c)
+            cond.L.Unlock()
+        }
+    }()
+
+    select {}
+}
+```
+
+
+
+### 12.4 第三方库的扩展
+
+[uber-go/atomic](https://github.com/uber-go/atomic)
+
+
+
+### 总结
+
 
 
 ![](images/image-20250221004556161.png)
+
+
+
+### 思考题
+
+> atomic.Value 只有 Load/Store 方法，你是不是感觉意犹未尽？你可以尝试为 Value 类型增加 Swap 和 CompareAndSwap 方法（可以参考一下[这份资料](https://github.com/golang/go/issues/39351)）。
+
+
 
 
 

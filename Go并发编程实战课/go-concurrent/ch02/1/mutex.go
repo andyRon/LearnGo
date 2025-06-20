@@ -2,8 +2,8 @@ package main
 
 // CAS操作，当时还没有抽象出atomic包
 func cas(val *int32, old, new int32) bool
-func semacquire(*int32) // sem  acquire
-func semrelease(*int32) // sem  release
+func semacquire(*int32) // sem  acquire  使用信号量将自己休眠
+func semrelease(*int32) // sem  release  利用信号量唤醒等待锁的其它goroutine中的一个
 
 // 互拆锁的结构
 type Mutex struct {

@@ -15,13 +15,13 @@ func main() {
 	c.Lock()
 	defer c.Unlock()
 	c.Count++
-	foo(c) // 复制锁
+	foo2(c) // 复制锁
 }
 
 // 这里Counter的参数是通过复制的方式传入的
-func foo(c Counter) {
+func foo2(c Counter) {
 	c.Lock()
 	defer c.Unlock()
-	fmt.Println("in foo")
+	fmt.Println("in foo2")
 
 }
