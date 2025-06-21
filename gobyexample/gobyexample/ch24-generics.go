@@ -45,7 +45,7 @@ func main() {
 
 	fmt.Println("keys:", MapKeys(m))
 
-	_ = MapKeys[int, string](m) // TODO
+	_ = MapKeys[int, string](m) // 下划线 _ 表示忽略返回值。 这里只是为了演示显式指定类型参数的语法
 
 	lst := List[int]{}
 	lst.Push(10)

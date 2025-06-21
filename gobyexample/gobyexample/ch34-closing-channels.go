@@ -2,7 +2,9 @@ package main
 
 import "fmt"
 
-// TODO
+// 通道的关闭
+
+// 关闭 一个通道意味着不能再向这个通道发送值了。 该特性可以向通道的接收方传达工作已经完成的信息。
 
 func main() {
 	jobs := make(chan int, 5)

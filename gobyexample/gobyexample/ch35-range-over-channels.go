@@ -2,7 +2,7 @@ package main
 
 import "fmt"
 
-// 通道范围
+// 通道遍历
 
 func main() {
 
