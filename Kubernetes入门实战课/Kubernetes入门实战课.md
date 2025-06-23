@@ -1401,7 +1401,7 @@ minikube kubectl
 
 它就会把与当前Kubernetes版本匹配的kubectl下载下来，存放在内部目录（例如 `.minikube/cache/linux/arm64/v1.23.3`），然后我们就可以使用它来对Kubernetes“发号施令”了。
 
-在minikube环境里，会用到两个客户端：`minikube`管理Kubernetes集群环境，`kubectl`操作实际的Kubernetes功能:
+在minikube环境里，会用到两个客户端：==`minikube`管理Kubernetes集群环境，`kubectl`操作实际的Kubernetes功能==:
 
 ![](images/image-20250115170248853.png)
 
@@ -1443,7 +1443,7 @@ $ minikube node list
 minikube	192.168.49.2
 ```
 
-从上面来看，Kubernetes集群里现在只有一个节点，名字就叫“minikube”，类型是“Control Plane”，里面有host、kubelet、apiserver三个服务，IP地址是192.168.49.2。
+从上面来看，Kubernetes集群里现在只有一个节点，名字就叫“minikube”，类型是“Control Plane”，里面有`host`、`kubelet`、`apiserver`三个服务，IP地址是192.168.49.2。
 
 登录到这个节点：
 
@@ -1505,6 +1505,8 @@ ngx    0/1     ImagePullBackOff   0          74s
 4. kubectl的用法与docker类似，也可以拉取镜像运行，但操作的不是简单的容器，而是Pod。
 
 
+
+> Kubernetes的官网（https://kubernetes.io/zh/）有非常详细的文档
 
 
 
