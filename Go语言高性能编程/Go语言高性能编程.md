@@ -312,6 +312,8 @@ pprof就是用来解决这个问题的。pprof 包含两部分：
 - 编译到程序中的`runtime/pprof`包
 - 性能剖析工具`go tool pprof`
 
+> pprof全称为 **Program Profiling**（程序性能分析）
+
 ### 2.1 性能分析类型
 
 #### CPU性能分析
