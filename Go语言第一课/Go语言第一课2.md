@@ -1510,15 +1510,31 @@ func main() {
 
 #### 关闭channel
 
+produce函数在发送完数据后，调用Go内置的close函数关闭了channel。channel关闭后，所有等待从这个channel接收数据的操作都将返回。
 
+看一下采用不同接收语法形式的语句，在channel被关闭后的返回值的情况：
+
+```go
+n := <- ch      // 当ch被关闭后，n将被赋值为ch元素类型的零值
+m, ok := <-ch   // 当ch被关闭后，m将被赋值为ch元素类型的零值, ok值为false
+for v := range ch { // 当ch被关闭后，for range循环结束
+    ... ...
+}
+```
+
+通过“comma, ok”惯用法或for range语句，可以准确地判定channel是否被关闭。而单纯采用n := <-ch形式的语句，就无法判定从ch返回的元素类型零值，究竟是不是因为channel被关闭后才返回的。
+
+另外，从前面produce的示例程序中，我们也可以看到，channel是在produce函数中被关闭的，这也是channel的一个使用惯例，那就是发送端负责关闭channel。
+
+<u>为什么要在发送端关闭channel呢？</u>
+
+这是因为发送端没有像接受端那样的、可以安全判断channel是否被关闭了的方法。同时，一旦向一个已经关闭的channel执行发送操作，这个操作就会引发panic，比如下面这个示例：
 
 ```go
 ch := make(chan int, 5)
 close(ch)
 ch <- 13 // panic: send on closed channel
 ```
-
-
 
 #### select 
 
@@ -1530,22 +1546,21 @@ ch <- 13 // panic: send on closed channel
 select {
 case x := <-ch1:     // 从channel ch1接收数据
 	... ...
-
 case y, ok := <-ch2: // 从channel ch2接收数据，并根据ok值判断ch2是否已经关闭
 	... ...
-
 case ch3 <- z:       // 将z值发送到channel ch3中:
 	... ...
-
 default:             // 当上面case中的channel通信均无法实施时，执行该默认分支
 }
 ```
 
-当select语句中没有default分支，而且所有case中的channel操作都阻塞了的时候，整个select语句都将被阻塞，直到某一个case上的channel变成可发送，或者某个case上的channel变成可接收，select语句才可以继续进行下去。
+当select语句中没有default分支，而且所有case中的channel操作都阻塞了的时候，整个select语句都将被阻塞，直到某一个case上的channel变成**可发送**，或者某个case上的channel变成可接收，select语句才可以继续进行下去。
+
+channel和select两种原语的操作都十分简单，它们都遵循了Go语言“追求简单”的设计哲学，但它们却为Go并发程序带来了强大的表达能力。
 
 
 
-### 33.2 无缓冲channel的惯用法 🔖
+### 33.2 无缓冲channel的惯用法
 
 无缓冲channel兼具通信和同步特性，在并发程序中应用颇为广泛。
 
@@ -1579,7 +1594,16 @@ func main() {
 }
 ```
 
+spawn函数返回的channel，被用于承载新Goroutine退出的“通知信号”，这个信号专门用作通知main goroutine。main goroutine在调用spawn函数后一直阻塞在对这个“通知信号”的接收动作上。
 
+结果：
+
+```
+start a worker...
+worker start to work...
+worker is working...
+worker work done!
+```
 
 - 1对n通知信号，常被用于协调多个Goroutine一起工作
 
@@ -1654,7 +1678,7 @@ the group of workers work done!
 
 #### 第二种用法：用于替代锁机制
 
-无缓冲channel具有同步特性，这让它在某些场合可以替代锁，让程序更加清晰，可读性也更好。对比：
+无缓冲channel具有**同步特性**，这让它在某些场合可以替代锁，让程序更加清晰，可读性也更好。对比：
 
 - 一个传统的、基于“共享内存”+“互斥锁”的Goroutine安全的计数器
 
@@ -1735,6 +1759,21 @@ func main() {
 
 这种并发设计逻辑更符合Go语言所倡导的**“不要通过共享内存来通信，而是通过通信来共享内存”**的原则。
 
+```
+goroutine-9: current counter value is 10
+goroutine-0: current counter value is 1
+goroutine-6: current counter value is 7
+goroutine-2: current counter value is 3
+goroutine-8: current counter value is 9
+goroutine-4: current counter value is 5
+goroutine-5: current counter value is 6
+goroutine-1: current counter value is 2
+goroutine-7: current counter value is 8
+goroutine-3: current counter value is 4
+```
+
+
+
 ### 33.3 带缓冲channel的惯用法 🔖🔖
 
 带缓冲的channel与无缓冲的channel的最大不同之处，就在于它的**==异步性==**。也就是说，对一个带缓冲channel，在缓冲区未满的情况下，对它进行发送操作的Goroutine不会阻塞挂起；在缓冲区有数据的情况下，对它进行接收操作的Goroutine也不会阻塞挂起。
@@ -1781,6 +1820,16 @@ Go并发设计的一个惯用法，就是将带缓冲channel用作计数信号�
 
 - 当ch为无缓冲channel时，len(ch)总是返回0；
 - 当ch为带缓冲channel时，len(ch)返回当前channel ch中**尚未被读取的元素个数**。
+
+
+
+![](images/image-20250701202238835.png)
+
+
+
+
+
+![](images/image-20250701202311870.png)
 
 
 
