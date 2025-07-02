@@ -135,3 +135,7 @@ https://learnku.com/docs/gorm/v2
 
 https://wails.io/zh-Hans/docs/introduction（🔖https://wails.io/zh-Hans/docs/howdoesitwork）
 
+
+
+
+

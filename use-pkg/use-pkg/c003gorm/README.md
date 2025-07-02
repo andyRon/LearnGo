@@ -1,6 +1,8 @@
 GORM文档学习
 ---
 
+https://gorm.io/zh_CN/docs/
+
 
 ```
 gorm.io/driver/mysql
