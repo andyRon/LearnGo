@@ -1,11 +1,18 @@
 syntax = "proto3";
-package main;
+package model;
 
-option go_package ="./"; // 指定RPC文件生成路径地址
+option go_package ="./model";
 
 // this is comment
 message Student {
   string name = 1;
   int32 age = 2;
   repeated int32 scores = 3;
+  bool Male = 4;
+
+  enum Gender {
+    FEMALE = 0;
+    MALE = 1;
+  }
+  Gender gender = 5;
 }
