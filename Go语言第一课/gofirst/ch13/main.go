@@ -12,12 +12,12 @@ func main() {
 	//str2()
 	//str3()
 
-	encodeRune()
+	//encodeRune()
 	//decodeRune()
 
 	//str4()
 
-	//str5()
+	str5()
 }
 
 func str1() {
@@ -59,7 +59,7 @@ func encodeRune() {
 	fmt.Printf("这个unicode字符是：%c\n", r)
 	buf := make([]byte, 3)
 	_ = utf8.EncodeRune(buf, r) // 对rune进行utf8编码
-	fmt.Printf("这个字符的utf8描述为：0x%X\n", buf)
+	fmt.Printf("这个字符的utf8描述为：0x%x\n", buf)
 }
 
 // []byte -> rune
@@ -69,7 +69,7 @@ func decodeRune() {
 	fmt.Printf("字节序列解码后的unicode字符是：%s\n", string(r))
 }
 
-// 字符串内部表示
+// 字符串内部表示1
 func str4() {
 	var s = "hello"
 	hdr := (*reflect.StringHeader)(unsafe.Pointer(&s)) // 将string类型变量地址显式转型为reflect.StringHeader
