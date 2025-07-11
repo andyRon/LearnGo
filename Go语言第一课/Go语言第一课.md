@@ -3211,7 +3211,7 @@ map[int]string    // key与value元素的类型不同
 
 map类型对value的类型没有限制，但是对key的类型却有严格要求，因为map类型要保证**key的==唯一性==**，**key的类型必须支持“==”和“!=”两种比较操作符**。
 
-在Go语言中，**函数类型、map类型自身，以及切片**只支持与nil的比较，而不支持同类型两个变量的比较，不能作为map的key类型的。
+在Go语言中，**函数类型、map类型自身，以及切片==只支持与nil的比较==，而不支持同类型两个变量的比较，不能作为map的key类型的。**
 
 ```go
 s1 := make([]int, 1)
@@ -3292,6 +3292,8 @@ m1 := make(map[int]string) // 未指定初始容量
 m2 := make(map[int]string, 8) // 指定初始容量为8
 ```
 
+map类型的容量不会受限于它的初始容量值，当其中的键值对数量超过初始容量后，Go运行时会自动增加map类型的容量，保证后续键值对的正常插入。
+
 ### 16.3 map的基本操作
 
 #### 1️⃣插入新键值对
@@ -3325,7 +3327,7 @@ m["key3"] = 3
 fmt.Println(len(m)) // 3 
 ```
 
-> 不能对map类型变量调用cap，来获取当前容量
+> **不能对map类型变量调用cap，来获取当前容量**，这是map类型与切片类型的一个不同点。
 
 #### 3️⃣查找和数据读取
 
@@ -3412,9 +3414,9 @@ func main() {
 }
 ```
 
-### 16.5 map的内部实现 ❤️ 
+### 16.5 map的内部实现 ❤️ 🔖
 
-Go运行时使用一张哈希表来实现抽象的map类型。运行时实现了map类型操作的所有功能，包括查找、插入、删除等。在编译阶段，Go编译器会将Go语法层面的map操作，重写成运行时对应的函数调用。大致的对应关系是这样的：
+Go运行时使用一张**哈希表**来实现抽象的map类型。运行时实现了map类型操作的所有功能，包括查找、插入、删除等。在编译阶段，Go编译器会将Go语法层面的map操作，重写成运行时对应的函数调用。大致的对应关系是这样的：
 
 ```go
 // 创建map类型变量实例
@@ -3434,8 +3436,6 @@ delete(m, "key")   → runtime.mapdelete(maptype, m, “key”)
 map类型在Go运行时层实现的示意图：
 
 ![](images/iShot_2025-03-26_12.16.45.png)
-
-
 
 #### 1️⃣初始状态
 
@@ -3471,27 +3471,23 @@ hmap 类型是 map 类型的头部结构（header），它存储了后续 map �
 > )
 > ```
 
-
-
 当某个bucket（比如buckets[0])的8个空槽slot）都填满了，且map尚未达到扩容的条件的情况下，运行时会建立overflow bucket，并将这个overflow bucket挂在上面bucket（如buckets[0]）末尾的overflow指针上，这样两个buckets形成了一个链表结构，直到下一次map扩容之前，这个结构都会一直存在。
 
-每个bucket由三部分组成，从上到下分别是tophash区域、key存储区域和value存储区域。
+每个bucket由三部分组成，从上到下分别是**tophash区域、key存储区域和value存储区域**。
 
 ##### tophash区域
 
-当我们向map插入一条数据，或者是从map按key查询数据的时候，运行时都会使用哈希函数对key做哈希运算，并获得一个哈希值（hashcode）。这个hashcode非常关键，运行时会把hashcode“一分为二”来看待，其中低位区的值用于选定bucket，高位区的值用于在某个bucket中确定key的位置。示意图：
+当我们向map插入一条数据，或者是从map按key查询数据的时候，运行时都会使用哈希函数对key做哈希运算，并获得一个哈希值（hashcode）。这个hashcode非常关键，运行时会把hashcode“一分为二”来看待，其中**低位区**的值用于选定bucket，**高位区**的值用于在某个bucket中确定key的位置。示意图：
 
 ![](images/image-20250326123250461.png)
 
 因此，每个bucket的tophash区域其实是用来快速定位key位置的，这样就避免了逐个key进行比较这种代价较大的操作。尤其是当key是size较大的字符串类型时，好处就更突出了。这是一种以空间换时间的思路。
 
-
-
 ##### key存储区域
 
 tophash区域下面是一块连续的内存区域，存储的是这个bucket承载的所有key数据。运行时在分配bucket的时候需要知道key的Size。
 
-运行时是如何知道key的size的呢？
+<u>运行时是如何知道key的size的呢？</u>
 
 当声明一个map类型变量，比如`var m map[string]int`时，Go运行时就会为这个变量对应的特定map类型，生成一个`runtime.maptype`实例。如果这个实例已经存在，就会直接复用。
 
@@ -3508,9 +3504,9 @@ type maptype struct {
 } 
 ```
 
-这个实例包含了我们需要的map类型中的所有”元信息”。我们前面提到过，编译器会把语法层面的map操作重写成运行时对应的函数调用，这些运行时函数都有一个共同的特点，那就是第一个参数都是maptype指针类型的参数。🔖
+这个实例包含了我们需要的map类型中的所有”元信息”。前面提到过，编译器会把语法层面的map操作重写成运行时对应的函数调用，这些运行时函数都有一个共同的特点，那就是第一个参数都是maptype指针类型的参数。🔖
 
-**Go运行时就是利用maptype参数中的信息确定key的类型和大小的。**
+**Go运行时就是利用maptype参数中的信息确定key的类型和大小的。**map所用的hash函数也存放在maptype.key.alg.hash(key, hmap.hash0)中。同时maptype的存在也让Go中所有map类型都共享一套运行时map操作函数，而不是像C++那样为每种map类型创建一套map操作函数，这样就节省了对最终二进制文件空间的占用。
 
 ##### value存储区域
 
@@ -3518,7 +3514,7 @@ key存储区域下方的另外一块连续的内存区域是key对应的value。
 
 Go运行时采用了把key和value分开存储的方式，而不是采用一个kv接着一个kv的kv紧邻方式存储，这带来的其实是算法上的复杂性，但却减少了因内存对齐带来的内存浪费。
 
-以map[int8]int64为例，看看下面的存储空间利用率对比图：
+以`map[int8]int64`为例，看看下面的存储空间利用率对比图：
 
 ![](images/image-20250326124054630.png)
 
@@ -3534,15 +3530,13 @@ const (
 )
 ```
 
-
-
 #### 2️⃣map扩容
 
 map会对底层使用的内存进行自动管理。因此，在使用过程中，当插入元素个数超出一定数值后，map一定会存在自动扩容的问题，也就是怎么扩充bucket的数量，并重新在bucket间均衡分配数据的问题。
 
-map在什么情况下会进行扩容呢？
+<u>map在什么情况下会进行扩容呢？</u>
 
-Go运行时的map实现中引入了一个LoadFactor（负载因子），当**count > LoadFactor \* 2^B**或overflow bucket过多时，运行时会自动对map进行扩容。目前Go最新1.17版本LoadFactor设置为6.5（loadFactorNum/loadFactorDen）。
+Go运行时的map实现中引入了一个LoadFactor（负载因子），当`count > LoadFactor \* 2^B`或overflow bucket过多时，运行时会自动对map进行扩容。目前Go最新1.17版本LoadFactor设置为6.5（loadFactorNum/loadFactorDen）。
 
 ```go
 // $GOROOT/src/runtime/map.go
@@ -4782,9 +4776,9 @@ type visitFunc func(ast.Node) ast.Visitor
 
 ### 21.3 函数“一等公民”特性的高效运用 
 
-#### 应用一：函数类型的妙用🔖
+#### 应用一：函数类型的妙用❤️
 
-函数也可以被显式转型。
+**函数也可以被显式转型**。并且，这样的转型在特定的领域具有奇妙的作用，一个最为典型的示例就是标准库http包中的HandlerFunc这个类型。
 
 ```go
 func greeting(w http.ResponseWriter, r *http.Request) {
@@ -4804,6 +4798,8 @@ func ListenAndServe(addr string, handler Handler) error {
 }
 ```
 
+第二个参数handler的类型http.Handler：
+
 ```go
 // $GOROOT/src/net/http/server.go
 type Handler interface {
@@ -4811,9 +4807,50 @@ type Handler interface {
 }
 ```
 
-ServeHTTP方法的函数类型是`func(http.ResponseWriter, *http.Request)`，与函数`greeting`的类型一样。
+ServeHTTP方法的函数类型是`func(http.ResponseWriter, *http.Request)`，与自己定义的http请求处理函数`greeting`的类型一样。但是我们没法直接将greeting作为参数值传入，否则编译器会报错：
+
+```
+func(http.ResponseWriter, *http.Request) does not implement http.Handler (missing ServeHTTP method)
+```
+
+编译器提示函数greeting还没有实现接口Handler的方法，无法将它赋值给Handler类型的参数。代码中也没有直接将greeting传给ListenAndServe函数，而是将`http.HandlerFunc(greeting)`作为参数传给了ListenAndServe。
+
+```go
+// $GOROOT/src/net/http/server.go
+
+type HandlerFunc func(ResponseWriter, *Request)
+
+// ServeHTTP calls f(w, r).
+func (f HandlerFunc) ServeHTTP(w ResponseWriter, r *Request) {
+		f(w, r)
+}
+```
+
+HandlerFunc是一个基于函数类型定义的新类型，它的底层类型为函数类型`func(ResponseWriter, *Request)`。这个类型有一个方法ServeHTTP，然后实现了Handler接口。也就是说`http.HandlerFunc(greeting)`这句代码的真正含义，是**将函数greeting显式转换为HandlerFunc类型**，后者实现了Handler接口，满足ListenAndServe函数第二个参数的要求。
+
+另外，之所以http.HandlerFunc(greeting)这段代码可以通过编译器检查，正是因为HandlerFunc的底层类型与greeting函数的类型是一致的，这和下面整型变量的显式转型原理也是一样的:
+
+```go
+type MyInt int
+var x int = 5
+y := MyInt(x) // MyInt的底层类型为int，类比HandlerFunc的底层类型为func(ResponseWriter, *Request)
+```
 
 #### 应用二：利用闭包简化函数调用。
+
+Go闭包是在函数内部创建的匿名函数，这个匿名函数可以访问创建它的函数的参数与局部变量。我们可以利用闭包的这一特性来简化函数调用:
+
+```go
+func times(x, y int) int {
+	return x * y
+}
+
+times(2, 5) // 计算2 x 5
+times(3, 5) // 计算3 x 5
+times(4, 5) // 计算4 x 5
+```
+
+
 
 ```go
 // 高频乘数。partialTimes实质上就是用来生成以x为固定乘数的、接受另外一个乘数作为参数的、闭包函数的函数。
@@ -4824,7 +4861,33 @@ func partialTimes(x int) func(int) int {
 }
 ```
 
+当程序调用partialTimes(2)时，partialTimes实际上返回了一个调用times(2,y)的函数。
+
+使用partialTimes，分别生成以2、3、4为固定高频乘数的乘法函数，以及这些生成的乘法函数的使用方法：
+
+```go
+timesTwo := partialTimes(2)   // 以高频乘数2为固定乘数的乘法函数
+timesThree := partialTimes(3) // 以高频乘数3为固定乘数的乘法函数
+timesFour := partialTimes(4)  // 以高频乘数4为固定乘数的乘法函数
+fmt.Println(timesTwo(5))      // 10，等价于times(2, 5)
+fmt.Println(timesTwo(6))      // 12，等价于times(2, 6)
+fmt.Println(timesThree(5))    // 15，等价于times(3, 5)
+fmt.Println(timesThree(6))    // 18，等价于times(3, 6)
+fmt.Println(timesFour(5))     // 20，等价于times(4, 5)
+fmt.Println(timesFour(6))     // 24，等价于times(4, 6)
+```
+
+
+
 ### 小结
+
+函数声明
+
+函数字面值是由函数类型与函数体组成的，而函数类型则是由func关键字+函数签名组成。再拆解，函数签名又包括函数的参数列表与返回值列表。通常我们说函数签名时，会省去参数名与返回值变量名，只保留各自的类型信息。函数签名相同的两个函数类型就是相同的函数类型。
+
+Go函数采用值传递的方式进行参数传递。
+
+Go函数支持多返回值，Go语言的错误处理机制就是建立在多返回值的基础上的。
 
 与传统的C、C++、Java等静态编程语言中的函数相比，Go函数的最大特点就是它属于Go语言的“一等公民”。
 
@@ -4832,7 +4895,7 @@ func partialTimes(x int) func(int) int {
 
 > 列举出其他的高效运用函数“一等公民”特性的例子吗？
 
-函数作为“一等公民”的核心价值在于其灵活性和抽象能力，支持闭包、高阶函数、装饰器等模式，广泛应用于数据处理、事件回调、模块化设计等场景。不同语言（如 Go、Python、Java）的实现细节虽有差异，但核心理念相通。具体案例可参考各语言的官方文档或实践指南。
+函数作为“一等公民”的核心价值在于其灵活性和抽象能力，支持闭包、高阶函数、装饰器等模式，广泛应用于数据处理、事件回调、模块化设计等场景。不同语言（如Go、Python、Java）的实现细节虽有差异，但核心理念相通。具体案例可参考各语言的官方文档或实践指南。
 
 
 
@@ -5208,12 +5271,20 @@ func (e *OpError) Temporary() bool {
 }
 ```
 
+
+
 错误处理策略选择上的建议：
 
 - 请尽量使用“透明错误”处理策略，降低错误处理方与错误值构造方之间的耦合；
 - 如果可以通过错误值类型的特征进行错误检视，那么请尽量使用“错误行为特征检视策略”;
 - 在上述两种策略无法实施的情况下，再使用“哨兵”策略和“错误值类型检视”策略；
 - Go 1.13及后续版本中，尽量用errors.Is和errors.As函数替换原先的错误检视比较语句。
+
+
+
+### 思考题
+
+> 其它比较实用的错误处理策略。
 
 
 
@@ -5242,7 +5313,7 @@ func (e *OpError) Temporary() bool {
 
 当函数F调用panic函数时，函数F的执行将停止。不过，函数F中已进行求值的deferred函数都会得到正常执行，执行完这些deferred函数后，函数F才会把控制权返还给其调用者。
 
-对于函数F的调用者而言，函数F之后的行为就如同调用者调用的函数是panic一样，该panicking过程将继续在栈上进行下去，直到当前Goroutine中的所有函数都返回为止，然后Go程序将崩溃退出。
+对于函数F的调用者而言，函数F之后的行为就**如同调用者调用的函数是panic一样**，该panicking过程将继续在栈上进行下去，直到当前Goroutine中的所有函数都返回为止，然后Go程序将崩溃退出。
 
 ```go
 func foo() {
@@ -5544,7 +5615,7 @@ defer不仅可以用来**捕捉和恢复panic**，还能让函数变得**更简�
 > 	make new panic print println real recover
 > ```
 
-，**内置函数能否作为 `deferred` 函数取决于其返回值类型和语法特性**。
+**内置函数能否作为 `deferred` 函数取决于其返回值类型和语法特性**。
 
 - **可直接使用**的内置函数：`close`、`copy`、`delete`、`print`、`panic`、`recover` 等无返回值的函数。
 
@@ -5696,13 +5767,14 @@ body, err := io.ReadAll(resp.Body)
    
 2. **参数立即求值**  
    `defer` 的参数在注册时求值，而非执行时。例如：  
+   
    ```go
    x := 1
    defer fmt.Println(x) // 输出 1
    x = 2
    ```
-
-3. **性能优化**  
+   
+3. **性能优化**
    Go 1.14+ 的开放编码优化（Open-coded Defer）可减少 `defer` 的开销，但需满足条件（如函数内 `defer` 数量不超过 8 个）。
 
 
@@ -5819,25 +5891,41 @@ func (t *T) Set(a int) int {
 > ```go
 > // 类型T的方法Get的等价函数
 > func Get(t T) int {  
->     return t.a 
+>  return t.a 
 > }
 > 
 > // 类型*T的方法Set的等价函数
 > func Set(t *T, a int) int { 
->     t.a = a 
->     return t.a 
+>  t.a = a 
+>  return t.a 
 > }
 > ```
 >
 > 这种等价转换是由Go编译器在编译和生成代码时自动完成的。
+>
+> Go语言规范中还提供了方法表达式（Method Expression）的概念，可以让我们更充分地理解上面的等价转换。
 
+```go
+var t T
+t.Get()
+(&t).Set(1)
+```
 
+等价替换：
 
-==方法表达式（Method Expression）== 🔖
+```go
+var t T
+T.Get(t)
+(*T).Set(&t, 1)
+```
 
+这种直接以类型名T调用方法的表达方式，被称为==Method Expression（方法表达式）==。通过Method Expression这种形式，类型T只能调用T的方法集合（Method Set）中的方法，同理类型*T也只能调用*T的方法集合中的方法。
 
+Method Expression有些类似于C++中的静态方法（Static Method），C++中的静态方法在使用时，以该C++类的某个对象实例作为第一个参数，而Go语言的Method Expression在使用时，同样以receiver参数所代表的类型实例作为第一个参数。
 
-Go语言中的方法的本质就是，**一个以方法的receiver参数作为第一个参数的普通函数**。
+Go语言中的方法的本质就是，**==一个以方法的receiver参数作为第一个参数的普通函数==**。
+
+而且，Method Expression就是Go方法本质的最好体现，因为方法自身的类型就是一个普通函数的类型，我们甚至可以将它作为右值，赋值给一个函数类型的变量，比如下面示例：
 
 ```go
 func main() {
@@ -5851,13 +5939,42 @@ func main() {
 }    
 ```
 
+**==方法本质上是函数==**。
 
+### 24.3 巧解难题
 
+```go
+package main
 
+import (
+    "fmt"
+    "time"
+)
 
-### 巧解难题🔖
+type field struct {
+    name string
+}
 
+func (p *field) print() {
+    fmt.Println(p.name)
+}
 
+func main() {
+    data1 := []*field{{"one"}, {"two"}, {"three"}}
+    for _, v := range data1 {
+        go v.print()
+    }
+
+    data2 := []field{{"four"}, {"five"}, {"six"}}
+    for _, v := range data2 {
+        go v.print()
+    }
+
+    time.Sleep(3 * time.Second)
+}
+```
+
+🔖 我的MacOS运行结果不同
 
 ### 小结
 
@@ -5873,7 +5990,7 @@ Go方法本质上其实是一个以receiver参数作为第一个参数的函数�
 
 
 
-## 25 方法：方法集合与如何选择receiver类型？ 🔖
+## 25 方法：方法集合与如何选择receiver类型？
 
 由于在Go语言中，**方法本质上就是函数**，所以之前关于函数设计的内容对方法也同样适用，比如错误处理设计、针对异常的处理策略、使用defer提升简洁性，等等。
 
@@ -5891,11 +6008,51 @@ func (t *T) M2() <=> F2(t *T)
 
 **如果Go方法要把对receiver参数代表的类型实例的修改，反映到原类型实例上，那么应该选择*T作为receiver参数的类型**。
 
+<u>疑问：如果我们选择了`*T`作为Go方法receiver参数的类型，那么我们是不是只能通过`*T`类型变量调用该方法，而不能通过T类型变量调用了呢？</u>
+
+```go
+package main
+
+type T struct {
+	a int
+}
+
+func (t T) M1() {
+	t.a = 10
+}
+
+func (t *T) M2() {
+	t.a = 11
+}
+
+func main() {
+	var t1 T
+	println(t1.a) // 0
+	t1.M1()
+	println(t1.a) // 0
+	t1.M2()
+	println(t1.a) // 11
+
+	var t2 = &T{}
+	println(t2.a) // 0
+	t2.M1()
+	println(t2.a) // 0
+	t2.M2()
+	println(t2.a) // 11
+}
+```
+
+T类型的实例t1之所以可以调用receiver参数类型为`*T`的方法M2，都是Go编译器在背后自动进行转换的结果。或者说，t1.M2()这种用法是Go提供的“语法糖”：Go判断t1的类型为T，也就是与方法M2的receiver参数类型*T不一致后，会自动将`t1.M2()`转换为`(&t1).M2()`。
+
+同理，类型为*T的实例t2，它不仅可以调用receiver参数类型为`*T`的方法M2，还可以调用receiver参数类型为T的方法M1，这同样是因为Go编译器在背后做了转换。也就是，Go判断t2的类型为`*T`，与方法M1的receiver参数类型T不一致，就会自动将`t2.M1()`转换为`(*t2).M1()`。
+
+结论：**无论是T类型实例，还是\*T类型实例，都既可以调用receiver为T类型的方法，也可以调用receiver为\*T类型的方法**。
+
 ### 25.3 选择receiver参数类型的第二个原则
 
 如果receiver参数类型的size较大，以值拷贝形式传入就会导致较大的性能开销，这时选择*T作为receiver类型可能更好些。
 
-### 25.4 方法集合
+### 25.4 方法集合 🔖
 
 ==方法集合（Method Set）==
 
@@ -6313,11 +6470,94 @@ type NT T // 基于已存在的类型T创建新的defined类型NT
 type NI I // 基于已存在的接口类型I创建新defined接口类型NI
 ```
 
-🔖
+
+
+```go
+package main
+
+type T struct{}
+
+func (T) M1()  {}
+func (*T) M2() {}
+
+type T1 T
+
+func main() {
+	var t T
+	var pt *T
+	var t1 T1
+	var pt1 *T1
+
+	dumpMethodSet(t)
+	dumpMethodSet(t1)
+
+	dumpMethodSet(pt)
+	dumpMethodSet(pt1)
+}
+```
+
+结果：
+
+```
+main.T's method set:
+- M1
+
+main.T1's method set is empty!
+
+*main.T's method set:
+- M1
+- M2
+
+*main.T1's method set is empty!
+```
 
 
 
-> 无论原类型是接口类型还是非接口类型，类型别名都与原类型拥有完全相同的方法集合。
+```go
+type T struct{}
+
+func (T) M1()  {}
+func (*T) M2() {}
+
+type T1 = T
+
+func main() {
+    var t T
+    var pt *T
+    var t1 T1
+    var pt1 *T1
+
+    dumpMethodSet(t)
+    dumpMethodSet(t1)
+
+    dumpMethodSet(pt)
+    dumpMethodSet(pt1)
+}
+```
+
+结果：
+
+```
+main.T's method set:
+- M1
+
+main.T's method set:
+- M1
+
+*main.T's method set:
+- M1
+- M2
+
+*main.T's method set:
+- M1
+- M2
+```
+
+
+
+结论：**无论原类型是接口类型还是非接口类型，类型别名都与原类型拥有完全相同的方法集合。**
+
+
 
 
 
