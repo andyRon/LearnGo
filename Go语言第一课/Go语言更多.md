@@ -2755,7 +2755,63 @@ Go语言源码默认使用Unicode字符集，并采用UTF-8编码方案，Go还�
 
 
 
-## 66 time包
+## 66 time包 🔖
+
+常见的时间操作有获取当前时间、时间比较、时区相关的时间操作、时间格式化、定时器（一次性定时器timer和重复定时器ticker）的使用等。
+
+### 66.1 时间的基础操作
+
+#### 1 获取时间
+
+```go
+time.Now()
+```
+
+time包将Time类型用作对一个**即时时间（time instant）**的抽象。
+
+```go
+type Time struct {
+  wall uint64
+  ext  int64
+  loc *Location￼
+}
+```
+
+由三个字段组成的Time结构体要同时表示两种时间——==挂钟时间（wall time）==和==单调时间（monotonic time）==，并且精度级别为纳秒。
+
+闰秒🔖
+
+
+
+time.Time结构体字段wall的最高比特位是一个名为`hasMonotonic`的**标志比特位**。当hasMonotonic被置为1时，time.Time表示的即时时间中既包含挂钟时间，也包含单调时间。下图是当Time同时包含这两种时间表示时（hasMonotonic比特位被置为1）的原理示意图（基于Go 1.14版本）。
+
+![](images/image-20250715214524353.png)
+
+🔖
+
+![](images/image-20250715214622244.png)
+
+
+
+#### 2 获取特定时区的当前时间
+
+
+
+#### 3 时间的比较与运算
+
+
+
+### 66.2 时间的格式化输出
+
+![](images/image-20250715220121597.png)
+
+
+
+### 66.3 定时器的使用
+
+Timer的三种创建方式：NewTimer、AfterFunc和After。
+
+![](images/image-20250715220618832.png)
 
 
 
