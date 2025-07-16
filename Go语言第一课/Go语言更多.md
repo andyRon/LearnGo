@@ -2753,6 +2753,40 @@ Go是自带运行时的跨平台编程语言，Go中暴露给语言使用者的T
 
 Go语言源码默认使用Unicode字符集，并采用UTF-8编码方案，Go还提供了rune原生类型来表示Unicode字符。
 
+### 65.1 字符与字符集
+
+
+
+![](images/image-20250716134517907.png)
+
+
+
+
+
+### 65.2 Unicode字符集的诞生与UTF-8编码方案
+
+
+
+![](images/image-20250716134706633.png)
+
+
+
+
+
+### 65.3 字符编码方案间的转换
+
+
+
+![](images/image-20250716134850402.png)
+
+
+
+
+
+
+
+![](images/image-20250716135038704.png)
+
 
 
 ## 66 time包 🔖
@@ -2819,13 +2853,42 @@ Timer的三种创建方式：NewTimer、AfterFunc和After。
 
 Go多用于后端应用编程，而后端应用多以守护进程（daemon）的方式运行于机器上。守护程序对健壮性的要求甚高，即便是在退出时也要求做好收尾和清理工作，称之为==优雅退出==。在Go中，通过系统信号是实现优雅退出的一种常见手段。
 
-### 为什么不能忽略对系统信号的处理
+### 67.1 为什么不能忽略对系统信号的处理
 
-系统信号（signal）是一种软件中断，它提供了一种异步的事件处理机制，用于操作系统内核或其他应用进程通知某一应用进程发生了某种事件。
+==系统信号（signal）==是一种软件中断，它提供了一种异步的事件处理机制，用于操作系统内核或其他应用进程通知某一应用进程发生了某种事件。
 
 比如：一个在终端前台启动的程序，当用户按下中断键（一般是ctrl+c）时，该程序的进程将会收到内核发来的中断信号（SIGINT）。
 
+```go
+func main() {
+	var wg sync.WaitGroup
+	errChan := make(chan error, 1)
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "Hello, Singal!\n")
+	})
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		errChan <- http.ListenAndServe(":8080", nil)
+	}()
 
+	select {
+	case <-time.After(2 * time.Second):
+		fmt.Println("web server start ok")
+	case err := <-errChan:
+		fmt.Printf("web server start failed: %v\n", err)
+
+	}
+	wg.Wait()
+	fmt.Println("web server shutdown ok")
+}
+```
+
+```sh
+$ go build -o httpserv signal.go
+./httpserv
+web server start ok
+```
 
 
 
@@ -2833,21 +2896,160 @@ Go多用于后端应用编程，而后端应用多以守护进程（daemon）的
 
 1. 执行系统默认处理动作
 
-
+对于中断键触发的SIGINT信号，系统的默认处理动作是终止该应用进程，这是以上示例采用的信号处理方式，也是以上示例没有输出退出提示就退出了的原因。对于大多数系统信号，系统默认的处理动作是终止该进程。
 
 2. 忽略信号
 
-
-
 3. 捕捉信号并执行自定义处理动作
 
+可以**预先提供一个包含自定义处理动作的函数**，并告知系统在接收到某些信号时调用这个函数。系统中有两个系统信号是不能被捕捉的：终止程序信号SIGKILL和挂起程序信号SIGSTOP。
+
+**服务端程序**一般都是以**守护进程**的形式运行在后台的，并且一般都是通过系统信号通知这些守护程序执行退出操作的。
+
+在这样的情况下，如果选择以系统默认处理方式处理这些退出通知信号，那么守护进程将会被直接杀死，没有任何机会执行清理和收尾工作，比如：**等待尚未处理完的事务执行完毕，将未保存的数据强制落盘，将某些尚未处理的消息序列化到磁盘（等下次启动后处理）**等。这将导致某些处理过程被强制中断而丢失消息，留下无法恢复的现场，导致消息被破坏，甚至会影响下次应用的启动运行。
+
+因此，对于运行在生产环境下的程序，不要忽略对系统信号的处理，**而应采用捕捉退出信号的方式执行自定义的收尾处理函数**。
+
+### 67.2 Go语言对系统信号处理的支持
+
+**信号机制**的历史久远，早在最初的Unix系统版本上就能看到它的身影。信号机制也一直在演进，从最初的**不可靠信号机制**到后来的**可靠信号机制**，直到POSIX.1将其标准化，系统信号机制才稳定下来，但各个平台对信号机制的支持仍有差异。可以通过`kill -l`命令查看各个系统对信号的支持情况：
+
+```sh
+// Ubuntu 18.04￼
+$kill -l￼
+1) SIGHUP        2) SIGINT          3) SIGQUIT        4) SIGILL         5) SIGTRAP￼
+6) SIGABRT       7) SIGBUS          8) SIGFPE         9) SIGKILL       10) SIGUSR1￼
+11) SIGSEGV      12) SIGUSR2        13) SIGPIPE       14) SIGALRM       15) SIGTERM￼
+16) SIGSTKFLT    17) SIGCHLD        18) SIGCONT       19) SIGSTOP       20) SIGTSTP￼
+21) SIGTTIN      22) SIGTTOU        23) SIGURG        24) SIGXCPU       25) SIGXFSZ￼
+26) SIGVTALRM    27) SIGPROF        28) SIGWINCH      29) SIGIO         30) SIGPWR￼
+31) SIGSYS       34) SIGRTMIN       35) SIGRTMIN+1    36) SIGRTMIN+2    37) SIGRTMIN+3￼
+38) SIGRTMIN+4   39) SIGRTMIN+5     40) SIGRTMIN+6    41) SIGRTMIN+7    42) SIGRTMIN+8￼
+43) SIGRTMIN+9   44) SIGRTMIN+10    45) SIGRTMIN+11   46) SIGRTMIN+12   47) SIGRTMIN+13￼
+48) SIGRTMIN+14  49) SIGRTMIN+15    50) SIGRTMAX-14   51) SIGRTMAX-13   52) SIGRTMAX-12￼
+53) SIGRTMAX-11  54) SIGRTMAX-10    55) SIGRTMAX-9    56) SIGRTMAX-8    57) SIGRTMAX-7￼
+58) SIGRTMAX-6   59) SIGRTMAX-5     60) SIGRTMAX-4    61) SIGRTMAX-3    62) SIGRTMAX-2￼
+63) SIGRTMAX-1   64) SIGRTMAX   ￼
+
+// macOS 10.14.6￼
+$kill -l￼
+HUP INT QUIT ILL TRAP ABRT EMT FPE KILL BUS SEGV SYS PIPE ALRM TERM URG STOP TSTP CONT CHLD TTIN TTOU IO XCPU XFSZ VTALRM PROF WINCH INFO USR1 USR2
+```
+
+其中每个信号都包含**信号名称**（signal name，比如：SIGINT）和**信号编号**（signal number，比如：SIGINT的编号是2）。
+
+kill命令可以将特定信号（通过信号名称或信号编号）发送给某应用进程：
+
+```sh
+$kill -s signal_name pid // 如kill -s SIGINT 20023￼
+$kill -signal_number pid // 如kill -2 20023
+```
+
+信号机制经过多年演进，已经变得十分复杂和烦琐（考虑多种平台对标准的支持程度不一），比如不可靠信号、可靠信号、阻塞信号、信号处理函数的可重入等。如果让开发人员自己来处理这些复杂性，那么势必是一份不小的心智负担。Go语言将这些复杂性留给了运行时层，为用户层提供了体验相当友好接口——`os/signal`包。
+
+```go
+func Notify(c chan<- os.Signal, sig ...os.Signal)
+```
+
+该函数用来设置捕捉那些应用关注的系统信号，并在Go运行时层与Go用户层之间用一个channel相连。Go运行时捕捉到应用关注的信号后，会将信号写入channel，这样监听该channel的用户层代码便可收到该信号通知。下图形象地展示了Go运行时进行系统信号处理以及与用户层交互的原理。
+
+![](images/image-20250716125131290.png)
+
+Go运行时与用户层有两个交互点，一个是上面所说的承载信号交互的channel，而另一个则是运行时层引发的panic。
+
+Go将信号分为两大类：
+
+1. 同步信号
+
+   同步信号是指那些由**程序执行错误**引发的信号，包括SIGBUS（总线错误/硬件异常）、SIGFPE（算术异常）和SIGSEGV（段错误/无效内存引用）。一旦应用进程中的Go运行时收到这三个信号中的一个，意味着应用极大可能出现了严重bug，无法继续执行下去，这时Go运行时不会简单地将信号通过channel发送到用户层并等待用户层的异步处理，而是直接将信号转换成一个运行时panic并抛出。如果用户层没有专门的panic恢复代码，那么Go应用将默认异常退出。
+
+2. 异步信号
+
+   同步信号之外的信号都被Go划归为异步信号。异步信号不是由程序执行错误引起的，而是由**其他程序或操作系统内核**发出的。异步信号的默认处理行为因信号而异。
+
+   SIGHUP、SIGINT和SIGTERM这三个信号将导致程序直接退出；
+
+   SIGQUIT、SIGILL、SIGTRAP、SIGABRT、SIGSTKFLT、SIGEMT和SIGSYS在导致程序退出的同时，还会将程序退出时的栈状态打印出来；
+
+   SIGPROF信号则是被Go运行时用于实现**运行时CPU性能剖析指标采集**。
+
+   其他信号不常用，均采用操作系统的默认处理动作。对于用户层通过Notify函数捕获的信号，Go运行时则通过channel将信号发给用户层。
+
+Notify无法捕捉SIGKILL和SIGSTOP（操作系统机制决定的），也无法捕捉同步信号（Go运行时决定的），只有捕捉异步信号才是有意义的。下面的例子直观展示了无法被捕获的信号、同步信号及异步信号的运作机制：
+
+```go
+package main
+
+import (
+	"fmt"
+	"os"
+	"os/signal"
+	"sync"
+	"syscall"
+	"time"
+)
+
+// 直观展示了无法被捕获的信号、同步信号及异步信号的运作机制
+
+func catchAsyncSignal(c chan os.Signal) {
+	for {
+		s := <-c
+		fmt.Println("收到异步信号:", s)
+	}
+}
+
+func triggerSyncSignal() {
+	time.Sleep(3 * time.Second)
+	defer func() {
+		if e := recover(); e != nil {
+			fmt.Println("恢复panic:", e)
+			return
+		}
+	}()
+	var a, b = 1, 0
+	fmt.Println(a / b)
+}
+
+func main() {
+	var wg sync.WaitGroup
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, syscall.SIGFPE, syscall.SIGINT, syscall.SIGKILL)
+
+	wg.Add(2)
+	go func() {
+		catchAsyncSignal(c)
+		wg.Done()
+	}()
+
+	go func() {
+		triggerSyncSignal()
+		wg.Done()
+	}()
+
+	wg.Wait()
+}
+```
+
+🔖
 
 
-### Go语言对系统信号处理的支持
+
+如果多次调用Notify拦截某信号，但每次调用使用的channel不同，那么当应用进程收到异步信号时，Go运行时会给每个channel发送一份异步信号副本：
+
+```
+```
+
+🔖
 
 
 
-### 使用系统信号实现程序的优雅退出
+### 67.3 使用系统信号实现程序的优雅退出
+
+**==优雅退出（gracefully exit）==**指程序在退出前有机会等待尚未完成的事务处理、清理资源（比如关闭文件描述符、关闭socket）、保存必要中间状态、持久化内存数据（比如将内存中的数据落盘到文件中）等。
+
+与优雅退出对立的是==强制退出==，也就是常说的使用kill -9，即kill -s SIGKILL pid。
+
+🔖
 
 
 

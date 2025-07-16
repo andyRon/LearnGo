@@ -7,6 +7,8 @@ import (
 	"time"
 )
 
+// 应用进程收到SIGINT中断信号  示例
+
 func main() {
 	var wg sync.WaitGroup
 	errChan := make(chan error, 1)
