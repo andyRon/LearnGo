@@ -8,6 +8,8 @@ import (
 	"sync"
 )
 
+// 增加Goroutine标识
+
 func main() {
 	var wg sync.WaitGroup
 	wg.Add(1)

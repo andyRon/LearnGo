@@ -8,6 +8,8 @@ import (
 	"sync"
 )
 
+// 让输出的跟踪信息更具层次感
+// TODO
 func main() {
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -20,6 +22,11 @@ func main() {
 	wg.Wait()
 }
 
+// 打印跟踪信息
+// @param id 协程ID
+// @param name 协程名称
+// @param arrow 指向符号
+// @param indent 缩进层次
 func printTrace(id uint64, name, arrow string, indent int) {
 	indents := ""
 	for i := 0; i < indent; i++ {

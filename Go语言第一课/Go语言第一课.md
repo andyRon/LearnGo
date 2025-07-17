@@ -6605,14 +6605,14 @@ exit:  main
 
 程序按main -> foo -> bar的函数调用次序执行，代码在函数的入口与出口处分别输出了跟踪日志。
 
-分析代码：每个函数的入口处都使用defer设置了一个deferred函数。根据第23讲中讲解的defer的运作机制，**Go会在defer设置deferred函数时对defer后面的表达式进行求值**。foo函数中的defer Trace("foo")()这行代码为例，Go会对defer后面的表达式Trace("foo")()进行求值。由于这个表达式包含一个函数调用Trace("foo")，所以这个函数会被执行。
+分析代码：每个函数的入口处都使用defer设置了一个deferred函数。根据第23讲中讲解的defer的运作机制，**Go会在defer设置deferred函数时==对defer后面的表达式进行求值==**。foo函数中的defer Trace("foo")()这行代码为例，Go会对defer后面的表达式Trace("foo")()进行求值。由于这个表达式包含一个函数调用Trace("foo")，所以这个函数会被执行。
 
 不足之处：
 
-- 调用Trace时需手动显式传入要跟踪的函数名；
-- 如果是并发应用，不同Goroutine中函数链跟踪混在一起无法分辨；
-- 输出的跟踪结果缺少层次感，调用关系不易识别；
-- 对要跟踪的函数，需手动调用Trace函数。
+- <u>调用Trace时需手动显式传入要跟踪的函数名；</u>
+- <u>如果是并发应用，不同Goroutine中函数链跟踪混在一起无法分辨；</u>
+- <u>输出的跟踪结果缺少层次感，调用关系不易识别；</u>
+- <u>对要跟踪的函数，需手动调用Trace函数。</u>
 
 > 目标：**实现一个自动注入跟踪代码，并输出有层次感的函数调用链跟踪命令行工具**。
 
@@ -6658,7 +6658,7 @@ func bar() {
 
 
 
-### 27.3 增加Goroutine标识
+### 27.3 增加Goroutine标识 ❤️
 
 上面的Trace函数在面对只有一个Goroutine的时候，还是可以支撑的，但当程序中并发运行多个Goroutine的时候，多个函数调用链的出入口信息输出就会混杂在一起，无法分辨。
 
@@ -6667,18 +6667,163 @@ func bar() {
 > Go核心团队为了避免Goroutine ID的滥用，故意没有将Goroutine ID暴露给开发者。
 >
 > Go标准库的`net/http/h2_bundle.go`有获得Goroutine ID方法，但不是到处方法，可以自己复制出来改造一下。
+>
+> ```go
+> // $GOROOT/src/net/http/h2_bundle.go
+> var http2goroutineSpace = []byte("goroutine ")
+> 
+> func http2curGoroutineID() uint64 {
+>     bp := http2littleBuf.Get().(*[]byte)
+>     defer http2littleBuf.Put(bp)
+>     b := *bp
+>     b = b[:runtime.Stack(b, false)]
+>     // Parse the 4707 out of "goroutine 4707 ["
+>     b = bytes.TrimPrefix(b, http2goroutineSpace)
+>     i := bytes.IndexByte(b, ' ')
+>     if i < 0 {
+>         panic(fmt.Sprintf("No space found in %q", b))
+>     }
+>     b = b[:i]
+>     n, err := http2parseUintBytes(b, 10, 64)
+>     if err != nil {
+>         panic(fmt.Sprintf("Failed to parse goroutine ID out of %q: %v", b, err))
+>     }
+>     return n
+> }
+> ```
 
-🔖
+改造一下：
+
+```go
+// trace2/trace.go
+var goroutineSpace = []byte("goroutine ")
+
+func curGoroutineID() uint64 {
+    b := make([]byte, 64)
+    b = b[:runtime.Stack(b, false)]
+    // Parse the 4707 out of "goroutine 4707 ["
+    b = bytes.TrimPrefix(b, goroutineSpace)
+    i := bytes.IndexByte(b, ' ')
+    if i < 0 {
+        panic(fmt.Sprintf("No space found in %q", b))
+    }
+    b = b[:i]
+    n, err := strconv.ParseUint(string(b), 10, 64)
+    if err != nil {
+        panic(fmt.Sprintf("Failed to parse goroutine ID out of %q: %v", b, err))
+    }
+    return n
+}
+```
+
+改造了两个地方：
+
+- 一个地方是通过直接创建一个byte切片赋值给b，替代原http2curGoroutineID函数中从一个pool池获取byte切片的方式，
+- 另外一个是使用strconv.ParseUint替代了原先的http2parseUintBytes。
+
+改造后，就可以直接使用curGoroutineID函数来获取Goroutine的ID信息了。
+
+Trace函数中添加Goroutine ID信息的输出：
+
+```go
+// trace2/trace.go
+func Trace() func() {
+    pc, _, _, ok := runtime.Caller(1)
+    if !ok {
+        panic("not found caller")
+    }
+
+    fn := runtime.FuncForPC(pc)
+    name := fn.Name()
+
+    gid := curGoroutineID()
+    fmt.Printf("g[%05d]: enter: [%s]\n", gid, name)
+    return func() { fmt.Printf("g[%05d]: exit: [%s]\n", gid, name) }
+}
+```
+
+由单Goroutine改为多Goroutine并发的：
+
+```go
+// trace2/trace.go
+func A1() {
+    defer Trace()()
+    B1()
+}
+
+func B1() {
+    defer Trace()()
+    C1()
+}
+
+func C1() {
+    defer Trace()()
+    D()
+}
+
+func D() {
+    defer Trace()()
+}
+
+func A2() {
+    defer Trace()()
+    B2()
+}
+func B2() {
+    defer Trace()()
+    C2()
+}
+func C2() {
+    defer Trace()()
+    D()
+}
+
+func main() {
+    var wg sync.WaitGroup
+    wg.Add(1)
+    go func() {
+        A2()
+        wg.Done()
+    }()
+
+    A1()
+    wg.Wait()
+}
+```
+
+示例程序共有两个Goroutine，main groutine的调用链为A1 -> B1 -> C1 -> D，而另外一个Goroutine的函数调用链为A2 -> B2 -> C2 -> D。
+
+```
+g[00001]: enter: [main.A1]
+g[00001]: enter: [main.B1]
+g[00001]: enter: [main.C1]
+g[00001]: enter: [main.D]
+g[00001]: exit: [main.D]
+g[00001]: exit: [main.C1]
+g[00001]: exit: [main.B1]
+g[00001]: exit: [main.A1]
+g[00019]: enter: [main.A2]
+g[00019]: enter: [main.B2]
+g[00019]: enter: [main.C2]
+```
+
+
+
+由于Go运行时对Goroutine调度顺序的不确定性，各个Goroutine的输出还是会存在交织在一起的问题，这会给查看某个Goroutine的函数调用链跟踪信息带来阻碍。
+
+> 一个小技巧：可以将程序的输出重定向到一个本地文件中，然后通过Goroutine ID过滤出（可使用grep工具）你想查看的groutine的全部函数跟踪信息。
+
+
 
 ### 27.4 让输出的跟踪信息更具层次感
 
 对于程序员来说，缩进是最能体现出“层次感”的方法。
 
- 🔖
+ 
 
 
 
-### 27.5 利用代码生成自动注入Trace函数 
+### 27.5 利用代码生成自动注入Trace函数 🔖🔖
 
 #### 将Trace函数放入一个独立的module中
 
