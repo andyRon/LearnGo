@@ -971,6 +971,161 @@ Go语言程序在运行期使用reflect包访问程序的反射信息。
 
 
 
+## 48-2 反射2
+
+ref：[Go语言精进之路2](https://book.douban.com/subject/35720729/) 59条
+
+反射是程序在运行时访问、检测和修改它本身状态或行为的一种能力，各种编程语言所实现的反射机制各有不同。
+
+Go语言的`interface{}`类型变量具有析出任意类型变量的类型信息（type）和值信息（value）的能力，Go的反射本质上就是**利用interface{}的这种能力在运行时对任意变量的==类型和值信息==进行检视甚至是对值进行修改的机制**。
+
+### 1 Go反射的三大法则
+
+反射让静态类型语言Go在运行时具备了某种基于类型信息的**动态特性**。
+
+利用这种特性，fmt.Println在无法提前获知传入参数的真正类型的情况下依旧可以对其进行正确的格式化输出；
+
+json.Marshal也是通过这种特性对传入的任意结构体类型进行解构并正确生成对应的JSON文本。
+
+通过一个简单的构建SQL查询语句的例子来直观感受Go反射的“魔法”:
+
+```go
+func main() {
+	stmt, err := ConstructQueryStmt(&Product{})
+	if err != nil {
+		fmt.Println("construct query stmt for Product error: ", err)
+		return
+	}
+	fmt.Println(stmt)
+
+	stmt, err = ConstructQueryStmt(Person{})
+	if err != nil {
+		fmt.Println("construct query stmt for Person error: ", err)
+		return
+	}
+	fmt.Println(stmt)
+}
+
+// ConstructQueryStmt 参数是结构体实例，得到的是该结构体对应的表的数据查询语句文本
+// 采用了一种ORM（Object Relational Mapping，对象关系映射）风格的实现。
+// ConstructQueryStmt通过反射获得传入的参数obj的类型信息，包括（导出）字段数量、字段名、字段标签值等，并根据这些类型信息生成SQL查询语句文本。如果结构体字段带有orm标签，该函数会使用标签值替代默认列名（字段名）。
+func ConstructQueryStmt(obj any) (stmt string, err error) {
+	// 仅支持struct或struct指针类型
+	typ := reflect.TypeOf(obj)
+	if typ.Kind() == reflect.Ptr {
+		typ = typ.Elem()
+	}
+	if typ.Kind() != reflect.Struct {
+		err = errors.New("only struct is supported")
+		return
+	}
+
+	buffer := bytes.NewBufferString("")
+	buffer.WriteString("SELECT ")
+
+	if typ.NumField() == 0 {
+		fmt.Errorf("the type[%s] has no fields", typ.Name())
+		return
+	}
+
+	for i := 0; i < typ.NumField(); i++ {
+		field := typ.Field(i)
+
+		if i != 0 {
+			buffer.WriteString(", ")
+		}
+		column := field.Name
+		if tag := field.Tag.Get("orm"); tag != "" {
+			column = tag
+		}
+
+		buffer.WriteString(column)
+	}
+
+	stmt = fmt.Sprintf("%s FROM %s", buffer.String(), typ.Name())
+	return
+}
+
+type Product struct {
+	ID        uint32
+	Name      string
+	Price     uint32
+	LeftCount uint32 `orm:"left_count"`
+	Batch     string `orm:"batch_number"`
+	Updated   time.Time
+}
+
+type Person struct {
+	ID      string
+	Name    string
+	Age     uint32
+	Gender  string
+	Addr    string `orm:"address"`
+	Updated time.Time
+}
+```
+
+Go反射十分适合处理这一类问题，典型特点：
+
+- 输入参数的类型无法提前确定；
+- 函数或方法的处理结果因传入参数（的类型信息和值信息）的不同而异。
+
+反射在带来强大功能的同时，也是很多困扰你的问题的根源，比如：
+
+- 反射让你的代码逻辑看起来不那么清晰，难于理解；
+- 反射让你的代码运行得更慢；
+- 在编译阶段，编译器无法检测到使用反射的代码中的问题（这种问题只能在Go程序运行时暴露出来，并且一旦暴露，很大可能会导致运行时的panic）。
+
+Rob Pike还为Go反射的规范使用定义了三大法则，如果经过评估，你必须使用反射才能实现你要的功能特性，那么你在使用反射时需要牢记这三条法则。
+
+- 反射世界的入口：经由接口（interface{}）类型变量值进入反射的世界并获得对应的反射对象（reflect.Value或reflect.Type）。
+- 反射世界的出口：反射对象（reflect.Value）通过化身为一个接口（interface{}）类型变量值的形式走出反射世界。
+- 修改反射对象的前提：反射对象对应的reflect.Value必须是可设置的（**Settable**）。
+
+前两条法则可以用下图来表示：
+
+![](images/image-20250717150431598.png)
+
+### 2 反射世界的入口
+
+`reflect.TypeOf`和`reflect.ValueOf`是进入反射世界仅有的两扇“大门”。
+
+通过reflect.TypeOf这扇“门”进入反射世界，你将得到一个reflect.Type对象，该对象中包含了被反射的Go变量实例的**所有类型信息**；
+
+而通过reflect.ValueOf这扇“门”进入反射世界，你将得到一个reflect.Value对象。**`Value`对象是反射世界的核心**，不仅该对象中包含了被反射的Go变量实例的值信息，而且通过调用该对象的Type方法，我们还可以得到Go变量实例的类型信息，这与通过reflect.TypeOf获得类型信息是等价的：
+
+```go
+// reflect.ValueOf().Type()等价于reflect.TypeOf()￼
+var i int = 5￼
+val := reflect.ValueOf(i)￼
+typ := reflect.TypeOf(i)￼
+fmt.Println(reflect.DeepEqual(typ, val.Type())) // true
+```
+
+
+
+### 3 反射世界的出口
+
+reflect.Value.Interface()是reflect.ValueOf()的逆过程，通过Interface方法我们可以将reflect.Value对象恢复成一个interface{}类型的变量值。这个离开反射世界的过程实质是将reflect.Value中的类型信息和值信息重新打包成一个interface{}的内部表示。之后，我们就可以通过类型断言得到一个反射前的类型变量值
+
+
+
+### 4 输出参数、interface{}类型变量及反射对象的可设置性
+
+reflect.Value提供了CanSet、CanAddr及CanInterface等方法来帮助我们判断反射对象是否可设置（Settable）、可寻址、可恢复为一个interface{}类型变量。
+
+
+
+- 当被反射对象以值类型（T）传递给reflect.ValueOf时，所得到的反射对象（Value）是不可设置和不可寻址的。
+- 当被反射对象以指针类型（`*T`或`&T`）传递给reflect.ValueOf时，通过reflect.Value的Elem方法可以得到代表该指针所指内存对象的Value反射对象。而这个反射对象是可设置和可寻址的，对其进行修改（比如利用Value的SetInt方法）将会像函数的输出参数那样直接修改被反射对象所指向的内存空间的值。
+- 当传入结构体或数组指针时，通过Field或Index方法得到的代表结构体字段或数组元素的Value反射对象也是可设置和可寻址的。如果结构体中某个字段是非导出字段，则该字段是可寻址但不可设置的（比如上面例子中的age字段）。
+- 当被反射对象的静态类型是接口类型时（就像上面的interface{}类型变量i），该被反射对象的动态类型决定了其进入反射世界后的可设置性。如果动态类型为`*T`或`&T`时，就像上面传给变量i的是`&Person{}`，那么通过Elem方法获得的反射对象就是可设置和可寻址的。
+- map类型被反射对象比较特殊，它的key和value都是不可寻址和不可设置的。但我们可以通过Value提供的SetMapIndex方法对map反射对象进行修改，这种修改会同步到被反射的map变量中。
+
+
+
+
+
 ## 49 命令行工具
 
 ### 49.1 模块管理与依赖控制
