@@ -3428,9 +3428,9 @@ unsafe包之所以被命名为unsafe，主要是因为该包中定义了unsafe.P
 
 如下一些场景中，很大可能甚至是不可避免地会使用到cgo来实现Go与C的互操作：
 
-- 为了提升局部代码性能，用C代码替换一些Go代码。在性能方面，C代码之于Go就好比汇编代码之于C。
+- 为了提升**局部代码性能**，用C代码替换一些Go代码。在性能方面，C代码之于Go就好比汇编代码之于C。
 - 对Go内存GC的延迟敏感，需要自己手动进行内存管理（分配和释放）；
-- 为一些C语言专有的且没有Go替代品的库制作Go绑定（binding）或包装。比如：Oracle提供了C版本OCI库（Oracle Call Interface），但并未提供Go版本的OCI库以及连接数据库的协议细节，因此我们只能通过包装C语言的OCI版本与Oracle数据库通信。类似的情况还有一些图形驱动程序以及图形化的窗口系统接口（如OpenGL库等）。
+- 为**一些C语言专有的且没有Go替代品的库**制作Go绑定（binding）或包装。比如：Oracle提供了C版本OCI库（Oracle Call Interface），但并未提供Go版本的OCI库以及连接数据库的协议细节，因此我们只能通过包装C语言的OCI版本与Oracle数据库通信。类似的情况还有一些**图形驱动程序**以及**图形化的窗口系统接口**（如OpenGL库等）。
 - 与遗留的且很难重写或替换的C代码进行交互。
 
 ### 70.1 Go调用C代码的原理
@@ -3461,26 +3461,369 @@ func main() {
 - 紧邻注释了的C代码块之后（中间没有空行），我们导入了一个名为C的包；
 - 在main函数中通过C这个包调用了C代码中定义的函数print。
 
+这里的“`C`”不是包名，而是一种类似名字空间的概念，也可以理解为伪包名，C语言所有语法元素均在该伪包下面。
 
+编译这个带有C代码的Go源文件与常规的Go源文件没什么区别，依旧可以直接通过go build或go run来编译和执行。
+
+可以通过`go build -x -v`输出带有cgo代码的Go源文件的构建细节：
+
+```sh
+$ go build -x -v how_cgo_works.go 
+...
+```
+
+构建过程输出的内容很多，用下图来描绘一下构建的总体脉络：
 
 ![](images/image-20250508180720176.png)
 
-
+看到在实际编译过程中，go build调用了名为cgo的工具，cgo会识别和读取Go源文件（how_cgo_works.go）中的C代码，并将其提取后交给外部的C编译器（clang或gcc）编译，最后与Go源码编译后的目标文件链接成一个可执行程序。
 
 ### 70.2 在Go中使用C语言的类型
 
+#### 1 原生类型
 
+##### 数值类型
+
+```go
+C.char,￼
+C.schar (signed char),￼
+C.uchar (unsigned char),￼
+C.short,￼
+C.ushort (unsigned short),￼
+C.int, C.uint (unsigned int),￼
+C.long,￼
+C.ulong (unsigned long),￼
+C.longlong (long long),￼
+C.ulonglong (unsigned long long),￼
+C.float,￼
+C.double
+```
+
+Go的数值类型与C中的数值类型不是一一对应的，因此在使用对方类型变量时少不了显式类型转换操作
+
+##### 指针类型
+
+原生数值类型的指针类型可按Go语法在类型前面加上星号`*`，比如`var p *C.int`。但`void*`比较特殊，在Go中用`unsafe.Pointer`表示它，这是因为任何类型的指针值都可以转换为unsafe.Pointer类型，而unsafe.Pointer类型也可以转换回任意类型的指针类型。
+
+##### 字符串类型
+
+C语言中并不存在原生的字符串类型，在C中用带结尾`'\0'`的字符数组来表示字符串；而在Go中，string类型是语言的原生类型，因此这两种语言的互操作势必要进行字符串类型的转换。
+通过C.CString函数，我们可以将Go的string类型转换为C的“字符串”类型后再传给C函数使用。
+
+```go
+s := "Hello, Cgo\n"￼
+cs := C.CString(s)￼
+C.print(cs)
+```
+
+不过这个转型相当于在C语言世界的堆上分配一块新内存空间，这样转型后所得到的C字符串cs并不能由Go的GC（垃圾回收器）管理，我们必须在使用后手动释放cs所占用的内存，这就是例子中通过defer调用C.free释放掉cs的原因。再次强调，**对于在C内部分配的内存，Go中的GC是无法感知到的，因此要记着在使用后手动释放**。
+
+通过C.GoString可将C的字符串`（*C.char）`转换为Go的string类型:
+
+```go
+package main
+
+// #include <stdio.h>
+// #include <stdlib.h>
+// char *foo = "helloChina";
+import "C"
+import "fmt"
+
+func main() {
+	fmt.Printf("%T", C.GoString(C.foo))  // string
+}
+```
+
+这相当于在Go世界重新分配一块内存对象，并复制了C的字符串（foo）的信息，后续这个位于Go世界的新的string类型对象将和其他Go对象一样接受GC的管理。
+
+##### 数组类型
+
+C语言中的数组与Go语言中的数组差异较大，后者是原生的值类型，而前者与C中的指针在大部分场合可以随意转换。Go仅提供了C.GoBytes来将C中的char类型数组转换为Go中的[]byte切片类型：
+
+```go
+package main
+
+// char cArray[] = {'a', 'b', 'c', 'd', 'e', 'f'};
+import "C"
+import (
+	"fmt"
+	"unsafe"
+)
+
+func main() {
+	goArray := C.GoBytes(unsafe.Pointer(&C.cArray[0]), 6)
+	fmt.Printf("%c\n", goArray) // [a b c d e f]
+}
+```
+
+而对于其他类型的C数组，目前似乎无法直接显式地在两者之间进行类型转换。我们可以通过特定转换函数来将C的特定类型数组转换为Go的切片类型（Go中数组是值类型，其大小是静态的，转换为切片更为通用）。下面是一个将C整型数组转换为Go[]int32切片类型的例子：
+
+```go
+package main
+
+// int cArray[] = {1, 2, 3, 4, 5, 6, 7, 8};
+import "C"
+import (
+	"fmt"
+	"unsafe"
+)
+
+// 将C整型数组转换为Go[]int32切片类型
+func main() {
+	goArray := CArrayToGoArray(unsafe.Pointer(&C.cArray[0]), unsafe.Sizeof(C.cArray[0]), 8)
+	fmt.Println(goArray) // [1 2 3 4 5 6 7 8]
+}
+
+func CArrayToGoArray(cArray unsafe.Pointer, elemSize uintptr, len int) (goArray []int32) {
+	for i := 0; i < len; i++ {
+		j := *(*int32)((unsafe.Pointer)(uintptr(cArray) + uintptr(i)*elemSize))
+		goArray = append(goArray, j)
+	}
+	return
+}
+```
+
+注意：Go编译器并不能将C的cArray自动转换为数组的地址，所以不能像在C中使用数组那样将数组变量直接传递给函数，而是将数组第一个元素的地址传递给函数。
+
+#### 2 自定义类型
+
+##### 枚举（enum）
+
+对于具名的C枚举类型xx，我们可以通过`C.enum_xx`来访问该类型；如果是匿名枚举，则只能访问其字段了。
+
+##### 结构体（struct）
+
+通过C.struct_xx来访问C中定义的结构体类型xx
+
+```go
+package main
+
+// #include <stdlib.h>
+//
+// struct employee {
+//   char *id;
+//   int age;
+// };
+import "C"
+import (
+	"fmt"
+	"unsafe"
+)
+
+func main() {
+	id := C.CString("123456")
+	defer C.free(unsafe.Pointer(id))
+
+	var p = C.struct_employee{
+		id:  id,
+		age: 18,
+	}
+	// %#v 以 Go 语法格式输出值
+	fmt.Printf("%#v\n", p)  // main._Ctype_struct_employee{id:(*main._Ctype_char)(0x600002efc000), age:18, _:[4]uint8{0x0, 0x0, 0x0, 0x0}}
+}
+```
+
+##### 联合体（union）
+
+
+
+##### 别名类型（typedef）
+
+```go
+// typedef int myint;￼
+var a C.myint = 5￼
+fmt.Println(a)
+
+// typedef struct employee myemployee;￼
+var m C.struct_myemployee
+```
+
+#### 3 Go中获取C类型大小
+
+Go提供了`C.sizeof_T`来获取`C.T`类型的大小。如果是结构体、枚举及联合体类型，我们需要在T前面分别加上`struct_`、`enum_`和`union_`的前缀：
+
+```go
+package main
+
+// struct employee {
+//   char *id;
+//   int age;
+// };
+import "C"
+import "fmt"
+
+func main() {
+	fmt.Printf("%#v\n", C.sizeof_int)             // 4
+	fmt.Printf("%#v\n", C.sizeof_char)            // 1
+	fmt.Printf("%#v\n", C.sizeof_struct_employee) // 16
+}
+```
 
 ### 70.3 在Go中链接外部C库
 
+从代码结构上来讲，在Go源文件中大量编写C代码并不是Go推荐的惯用法。
 
+Go提供了`#cgo`指示符，可以用它指定Go源码在编译后与哪些共享库进行链接。
+
+```go
+// foo.go
+package main
+
+// #cgo CFLAGS: -I${SRCDIR}
+// #cgo LDFLAGS: -L${SRCDIR} -lfoo
+// #include <stdio.h>
+// #include <stdlib.h>
+// #include "foo.h"
+import "C"
+import "fmt"
+
+func main() {
+	fmt.Println(C.count)
+	C.foo()
+}
+```
+
+通过#cgo指示符告诉Go编译器在当前源码目录（`${SRCDIR}`会在编译过程中自动转换为当前源码所在目录的绝对路径）下查找头文件`foo.h`，并链接当前源码目录下的libfoo共享库。`C.count`变量和C.foo函数的定义都在libfoo共享库中。创建这个共享库：
+
+```c
+// foo.h
+extern int count;
+void foo();
+```
+
+```c
+// foo.c
+#include <stdio.h>
+#include "foo.h"
+
+int count = 100;
+void foo() {
+    printf("hello world, I'm foo!\n");
+}
+```
+
+用ar工具创建一个==静态共享库==文件`libfoo.a`:
+
+```sh
+$ gcc -c foo.c￼
+$ ar rv libfoo.a foo.o
+```
+
+构建并运行foo.go：
+
+```shell
+$ go build foo.go
+$ ./foo 
+100
+hello world, I'm foo!
+```
+
+看到foo.go成功链接到libfoo.a并生成最终的二进制文件foo。
+
+Go同样支持链接==动态共享库==，用下面的命令将上面的foo.c编译为一个动态共享库：
+
+```sh
+$ gcc -c foo.c￼
+// $ gcc -shared -Wl,-soname,libfoo.so -o libfoo.so  foo.o (在linux上)￼
+$ gcc -shared -o libfoo.so  foo.o
+```
+
+重新编译foo.go，并查看（在Linux上可以使用`ldd`，在macOS上使用`otool`）重新生成的二进制文件foo的动态共享库依赖情况：
+
+```sh
+$ go build foo.go               
+$ otool -L foo
+foo:
+        libfoo.so (compatibility version 0.0.0, current version 0.0.0)
+        /System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation (compatibility version 150.0.0, current version 3502.1.255)
+        /usr/lib/libresolv.9.dylib (compatibility version 1.0.0, current version 1.0.0)
+        /usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1351.0.0)
+```
+
+
+
+注意，Go支持多返回值，而C并不支持，因此当将C函数用在多返回值的Go调用中时，C的errno将作为函数返回值列表中最后那个error返回值返回。下面是个例子：
+
+```go
+// c_errno.go
+
+package main
+
+// #include <stdlib.h>
+// #include <stdio.h>
+// #include <errno.h>
+// int foo(int i) {
+//   errno = 0;
+//   if (i > 5) {
+//     errno = 8;
+//     return i - 5;
+//   } else {
+//     return i;
+//   }
+// }
+import "C"
+import "fmt"
+
+func main() {
+	i, err := C.foo(C.int(8))
+	if err != nil {
+		fmt.Println(err)
+	} else {
+		fmt.Println(i)
+	}
+}
+```
+
+
+
+```sh
+$g o run c_errno.go￼
+exec format error
+```
+
+`exec format error`就是errno为8时的错误描述信息。
 
 ### 70.4 在C中使用Go函数
 
-
+在C中使用Go函数的场合极少。在Go中，可以使用`export + 函数名`来导出Go函数为C所用。目前Go的导出函数供C使用的功能还十分有限，两种语言的调用约定不同，类型无法一一对应，Go中类似垃圾回收这样的高级功能让导出Go函数这一特性难于完美实现，导出的函数依旧无法完全脱离Go的环境，因此其实用性大打折扣。
 
 ### 70.5 使用cgo的开销
 
+#### 1 不能忽视的调用开销
+
+在Go代码中调用C函数看起来似乎很平滑，但实际上这种调用的开销要比调用Go函数多出**一个甚至多个数量级**。
 
 
-### 70.6 使用cgo代码的静态构建
+
+```sh
+$ go test -bench . -gcflags '-l'
+goos: darwin
+goarch: arm64
+pkg: gofirst/ch70cgo/5
+cpu: Apple M1
+BenchmarkCGO-8          43136834                28.16 ns/op
+BenchmarkGO-8           546780799                2.199 ns/op
+PASS
+ok      gofirst/ch70cgo/5       3.686s
+
+```
+
+
+
+#### 2 增加线程数量暴涨的可能性🔖
+
+
+
+#### 3 失去跨平台交叉构建能力🔖
+
+
+
+#### 4 其他开销
+
+
+
+
+
+### 70.6 使用cgo代码的静态构建🔖
+
+所谓静态构建就是指构建后的应用运行所需的所有符号、指令和数据都包含在自身的二进制文件当中，没有任何对外部动态共享库的依赖。静态构建出的二进制文件由于包含所有符号、指令和数据，因而通常要比非静态构建的应用大许多。默认情况下，Go没有采用静态构建。
