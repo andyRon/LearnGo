@@ -2864,60 +2864,360 @@ ok      command-line-arguments  11.767s
 
 
 
-## 60 使用pprof对程序进行性能剖析 🔖
+## 60 使用pprof对程序进行性能剖析
 
-### pprof的工作原理
+Go是“自带电池”（battery included）的编程语言，拥有着让其他主流语言羡慕的工具链，Go还内置了对代码进行性能剖析的工具：pprof。
+
+`pprof` 的全称是 **Performance Profiler**（性能分析器），它是 Go 语言官方提供的**性能分析工具**，主要用于诊断程序在 CPU、内存、阻塞、协程等方面的性能瓶颈。
+
+### 60.1 pprof的工作原理
 
 使用pprof对程序进行性能剖析的工作一般分为两个阶段：**数据采集和数据剖析**。
 
 ![](images/image-20250413103954463.png)
 
-#### 采集数据类型
+#### 1 采集数据类型
+
+在数据采集阶段，Go运行时会定期对剖析阶段所需的不同类型数据进行采样记录。当前主要支持的采样数据类型有如下几种
 
 1. CPU数据（cpu.prof）
 
-
+CPU类型采样数据是性能剖析中十分常见的采样数据类型，它能帮助我们识别出代码关键路径上消耗CPU最多的函数。一旦启用CPU数据采样，Go运行时会每隔一段短暂的时间（10ms）就中断一次（由SIGPROF信号引发）并记录当前所有goroutine的函数栈信息（存入cpu.prof）。
 
 2. 堆内存分配数据（mem.prof）
 
-
+堆内存分配采样数据和CPU采样数据一样，也是性能剖析中十分常见的采样数据类型，它能帮助我们了解Go程序的当前和历史内存使用情况。堆内存分配的采样频率可配置，默认每1000次堆内存分配会做一次采样（存入mem.prof）
 
 3. 锁竞争数据（mutex.prof）
 
-
+锁竞争采样数据记录了当前Go程序中互斥锁争用导致延迟的操作。如果你认为很大可能是互斥锁争用导致CPU利用率不高，那么你可以为`go tool pprof`工具提供此类采样文件以供性能剖析阶段使用。该类型采样数据在默认情况下是不启用的，请参见`runtime.SetMutexProfileFraction`或`go test -bench . xxx_test.go -mutexprofile mutex.out`启用它。
 
 4. 阻塞时间数据（block.prof）
 
+该类型采样数据记录的是goroutine在某共享资源（一般是由同步原语保护）上的阻塞时间，包括从无缓冲channel收发数据、阻塞在一个已经被其他goroutine锁住的互斥锁、向一个满了的channel发送数据或从一个空的channel接收数据等。该类型采样数据在默认情况下也是不启用的，请参见`runtime.SetBlockProfileRate`或`go test -bench . xxx_test.go -blockprofile block.out`启用它。
 
+#### 2 性能数据采集的方式
 
-#### 性能数据采集的方式
+Go目前主要支持两种性能数据采集方式：性能基准测试和独立程序。
 
-1. 通过性能基准测试进行数据采集
+1. 性能基准测试
+
+为应用中的关键函数/方法建立起性能基准测试之后，便可以通过执行性能基准测试采集到整个测试执行过程中有关被测方法的各类性能数据。这种方式尤其适用于对应用中关键路径上关键函数/方法性能的剖析。
+
+仅需为go test增加一些命令行选项即可在执行性能基准测试的同时进行性能数据采集。以CPU采样数据类型为例：
 
 ```sh
-go test -bench . xxx_test.go -cpuprofile=cpu.prof
+$ go test -bench . xxx_test.go -cpuprofile=cpu.prof
+$ ls￼
+cpu.prof xxx.test* xxx_test.go
+```
+
+一旦开启性能数据采集（比如传入-cpuprofile），go test的-c命令选项便会自动开启，go test命令执行后会自动编译出一个与该测试对应的可执行文件（这里是xxx.test）。该可执行文件可以在性能数据剖析过程中提供剖析所需的符号信息（如果没有该可执行文件，go tool pprof的disasm命令将无法给出对应符号的汇编代码）。而cpu.prof就是存储CPU性能采样数据的结果文件，后续将作为数据剖析过程的输入。
+
+其他类型的采样数据:
+
+```sh
 go test -bench . xxx_test.go -memprofile=mem.prof￼
 go test -bench . xxx_test.go -blockprofile=block.prof￼
 go test -bench . xxx_test.go -mutexprofile=mutex.prof
+```
+
+2. 独立程序的性能数据采集
+
+可以通过1️⃣标准库`runtime/pprof`和`runtime`包提供的低级API对独立程序进行性能数据采集。
+
+
+
+这种独立程序的性能数据采集方式**对业务代码侵入较多**，还要自己编写一些采集逻辑：**定义flag变量、创建输出文件、关闭输出文件**等。每次采集都要停止程序才能获取结果。（当然可以重新定义更复杂的控制采集时间窗口的逻辑，实现不停止程序也能获取采集数据结果。）
+
+Go在2️⃣`net/http/pprof`包中还提供了一种更为高级的针对独立程序的性能数据采集方式，这种方式尤其适合那些**内置了HTTP服务**的独立程序。net/http/pprof包可以直接利用已有的HTTP服务**对外提供用于性能数据采集的服务端点（endpoint）**。
+
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	_ "net/http/pprof"
+	"os"
+	"os/signal"
+	"syscall"
+)
+
+func main() {
+	http.Handle("/hello", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Println(*r)
+		w.Write([]byte("hello"))
+	}))
+	s := http.Server{
+		Addr: "localhost:8080",
+	}
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-c
+		s.Shutdown(context.Background())
+	}()
+	fmt.Println(s.ListenAndServe())
+}
 ```
 
 
 
 
 
-2. 独立程序的性能数据采集
+```go
+// //$GOROOT/src/net/http/pprof/pprof.go
 
-可以通过标准库runtime/pprof和runtime包提供的低级API对独立程序进行性能数据采集。
+func init() {
+	prefix := ""
+	if godebug.New("httpmuxgo121").Value() != "1" {
+		prefix = "GET "
+	}
+	http.HandleFunc(prefix+"/debug/pprof/", Index)
+	http.HandleFunc(prefix+"/debug/pprof/cmdline", Cmdline)
+	http.HandleFunc(prefix+"/debug/pprof/profile", Profile)
+	http.HandleFunc(prefix+"/debug/pprof/symbol", Symbol)
+	http.HandleFunc(prefix+"/debug/pprof/trace", Trace)
+}
+```
+
+该包的init函数向http包的默认请求路由器DefaultServeMux注册了多个服务端点和对应的处理函数。而正是通过这些服务端点，我们可以在该独立程序运行期间获取各种类型的性能采集数据。现在打开浏览器，访问http://localhost:8080/debug/pprof/。
+
+![net/http/pprof提供的性能采集页面](images/image-20250723205116125.png)
+
+这个页面里列出了多种类型的性能采集数据，**点击其中任何一个即可完成该种类型性能数据的一次采集**。profile是CPU类型数据的服务端点，点击该端点后，该服务默认会发起一次持续30秒的性能采集，得到的数据文件会由浏览器自动下载到本地。如果想自定义采集时长，可以通过为服务端点传递时长参数实现，比如下面就是一个采样60秒的请求：
+
+```
+http://localhost:8080/debug/pprof/profile?seconds=60
+```
 
 
 
-#### 性能数据的剖析
+如果独立程序的代码中没有使用http包的默认请求路由器DefaultServeMux，那么我们就需要重新在新的路由器上为pprof包提供的性能数据采集方法注册服务端点
 
 
 
+如果是非HTTP服务程序，则在导入包的同时还需单独启动一个用于性能数据采集的goroutine。
 
 
-### 使用pprof进行性能剖析的实例
+
+通过上面几个示例我们可以看出，相比第一种方式，导入net/http/pprof包进行独立程序性能数据采集的方式侵入性更小，代码也更为独立，并且无须停止程序，通过预置好的各类性能数据采集服务端点即可随时进行性能数据采集。
+
+#### 3 性能数据的剖析
+
+Go工具链通过pprof子命令提供了两种性能数据剖析方法：**命令行交互式和Web图形化**。命令行交互式的剖析方法更常用，也是基本的性能数据剖析方法；而基于Web图形化的剖析方法在剖析结果展示上更为直观。
+
+##### 命令行交互方式
+
+三种方式执行go tool pprof以进入采用命令行交互式的性能数据剖析环节：
+
+```sh
+// 剖析通过性能基准测试采集的数据
+$ go tool pprof xxx.test cpu.prof 
+// 剖析独立程序输出的性能采集数据￼
+$ go tool pprof standalone_app cpu.prof 
+// 通过net/http/pprof注册的性能采集数据服务端点获取数据并剖析￼
+$ go tool pprof http://localhost:8080/debug/pprof/profile
+```
+
+
+
+以pprof_standalone1.go这个示例的性能采集数据为例，看一下在命令行交互式的剖析环节，有哪些常用命令可用。
+
+首先生成CPU类型性能采集数据：
+
+```sh
+$ go build -o pprof_standalone1 pprof_standalone1.go￼
+$ ./pprof_standalone1 -cpuprofile pprof_standalone1_cpu.prof
+^Cprogram exit
+```
+
+通过`go tool pprof`命令进入命令行交互模式：
+
+```sh
+$ go tool pprof pprof_standalone1 pprof_standalone1_cpu.prof
+File: pprof_standalone1
+Type: cpu
+Time: 2025-07-23 21:36:26 CST
+Duration: 6.73s, Total samples = 40ms ( 0.59%)
+Entering interactive mode (type "help" for commands, "o" for options)
+(pprof) 
+```
+
+从pprof子命令的输出中我们看到：程序运行6.73s，采样总时间为40ms，占总时间的0.59%。
+
+最常用的命令是topN（N为数字，如果不指定，默认等于10）：
+
+```sh
+(pprof) top
+Showing nodes accounting for 40ms, 100% of 40ms total
+Showing top 10 nodes out of 16
+      flat  flat%   sum%        cum   cum%
+      20ms 50.00% 50.00%       20ms 50.00%  runtime.kevent
+      10ms 25.00% 75.00%       10ms 25.00%  fmt.Fprintln
+      10ms 25.00%   100%       10ms 25.00%  runtime.pthread_cond_signal
+         0     0%   100%       10ms 25.00%  fmt.Println (inline)
+         0     0%   100%       10ms 25.00%  main.main
+         0     0%   100%       20ms 50.00%  runtime.findRunnable
+         0     0%   100%       10ms 25.00%  runtime.main
+         0     0%   100%       30ms 75.00%  runtime.mcall
+         0     0%   100%       20ms 50.00%  runtime.netpoll
+         0     0%   100%       10ms 25.00%  runtime.notewakeup
+(pprof)
+```
+
+🔖
+
+```sh
+(pprof) top -cum
+```
+
+
+
+```sh
+(pprof) list main.main
+```
+
+
+
+```sh
+(pprof) list time.Sleep￼
+```
+
+
+
+还可以生成CPU采样数据的函数调用图:
+
+```sh
+(pprof) png
+Generating report in profile001.png
+```
+
+
+
+##### Web图形化方式
+
+```sh
+$ go tool pprof -http=:9090 pprof_standalone1_cpu.prof
+```
+
+
+
+### 60.2 使用pprof进行性能剖析的实例 🔖🔖
+
+#### 1 待优化程序（step0）
+
+
+
+#### 2 CPU类性能数据采样及数据剖析（step1）
+
+
+
+```sh
+$ go test -v -run=^$ -bench=.
+goos: darwin
+goarch: arm64
+pkg: gofirst/ch60pprof/2/step1
+cpu: Apple M1
+BenchmarkHi
+BenchmarkHi-8             675636              1499 ns/op
+PASS
+ok      gofirst/ch60pprof/2/step1       1.240s
+
+```
+
+
+
+```sh
+$ go test -v -run=^$ -bench=^BenchmarkHi$ -benchtime=2s -cpuprofile=cpu.prof
+goos: darwin
+goarch: arm64
+pkg: gofirst/ch60pprof/2/step1
+cpu: Apple M1
+BenchmarkHi
+BenchmarkHi-8            1585893              1561 ns/op
+PASS
+ok      gofirst/ch60pprof/2/step1       4.176s
+
+$ go tool pprof step1.test cpu.prof
+File: step1.test
+Type: cpu
+Time: 2025-07-23 22:01:33 CST
+Duration: 3.73s, Total samples = 3.39s (90.85%)
+Entering interactive mode (type "help" for commands, "o" for options)
+(pprof) top -cum
+Showing nodes accounting for 1.41s, 41.59% of 3.39s total
+Dropped 56 nodes (cum <= 0.02s)
+Showing top 10 nodes out of 131
+      flat  flat%   sum%        cum   cum%
+         0     0%     0%      2.38s 70.21%  gofirst/ch60pprof/2/step1.BenchmarkHi
+     0.01s  0.29%  0.29%      2.38s 70.21%  gofirst/ch60pprof/2/step1.handleHi
+         0     0%  0.29%      2.38s 70.21%  testing.(*B).launch
+         0     0%  0.29%      2.38s 70.21%  testing.(*B).runN
+     1.40s 41.30% 41.59%      1.40s 41.30%  runtime.memmove
+         0     0% 41.59%      1.37s 40.41%  bytes.(*Buffer).Write
+         0     0% 41.59%      1.37s 40.41%  net/http/httptest.(*ResponseRecorder).Write
+         0     0% 41.59%      0.94s 27.73%  runtime.systemstack
+         0     0% 41.59%      0.92s 27.14%  regexp.MatchString
+         0     0% 41.59%      0.90s 26.55%  regexp.Compile (inline)
+(pprof) list handleHi
+Total: 3.39s
+ROUTINE ======================== gofirst/ch60pprof/2/step1.handleHi in /Users/andyron/myfield/github/LearnGo/Go语言第一课/gofirst/ch60pprof/2/step1/demo.go
+      10ms      2.38s (flat, cum) 70.21% of Total
+         .          .     13:func handleHi(w http.ResponseWriter, r *http.Request) {
+      10ms      930ms     14:   if match, _ := regexp.MatchString(`^\w*$`, r.FormValue("color")); !match {
+         .          .     15:           http.Error(w, "Optional color is invalid", http.StatusBadRequest)
+         .          .     16:           return
+         .          .     17:   }
+         .          .     18:   visitNum := atomic.AddInt64(&visitors, 1)
+         .       30ms     19:   w.Header().Set("Content-Type", "text/html; charset=utf-8")
+         .      1.37s     20:   w.Write([]byte("<h1 style='color: " + r.FormValue("color") +
+         .       50ms     21:           "'>Welcome!</h1>You are visitor number " + fmt.Sprint(visitNum) + "!"))
+         .          .     22:}
+         .          .     23:
+         .          .     24:func main() {
+         .          .     25:   log.Printf("Starting on port 8080")
+         .          .     26:   http.HandleFunc("/hi", handleHi)
+(pprof) 
+
+```
+
+
+
+#### 3 第一次优化（step2）
+
+
+
+```sh
+$ go test -v -run=^$ -bench=.
+goos: darwin
+goarch: arm64
+pkg: gofirst/ch60pprof/2/step2
+cpu: Apple M1
+BenchmarkHi
+BenchmarkHi-8            5292670               226.6 ns/op           298 B/op          4 allocs/op
+PASS
+ok      gofirst/ch60pprof/2/step2       1.916s
+
+```
+
+
+
+#### 4 内存分配采样数据剖析
+
+
+
+#### 5 第二次优化（step3）
+
+
+
+#### 6 零内存分配（step4）
+
+
+
+#### 7 查看并发下的阻塞情况（step5）
 
 
 
