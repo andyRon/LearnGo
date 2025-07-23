@@ -4079,3 +4079,462 @@ ok      gofirst/ch70cgo/5       3.686s
 
 
 ### 71.7 随机数生成
+
+
+
+
+
+## 72 使用go generate驱动代码生成
+
+把Go工具链中代码生成工具（go generate）单独介绍使用。
+
+### 72.1 go generate：Go原生的代码生成“驱动器”
+
+构建中小规模的Go项目时通常无须借助外部构建管理工具（比如shell脚本、make等），Go工具链便可以很好地满足我们关于构建的大多数需求。
+
+但有些时候，目标的构建需要依赖一些额外的==前置动作==（如代码生成等），在这种情况下，单靠go build我们无法驱动前置动作的执行。
+
+#### make
+
+以往可以借助外部构建管理工具，比如`make`。下面是一个借助make工具对一个依赖代码生成的项目进行构建的示例：
+
+```shell
+$ tree protobuf-make￼
+protobuf-make￼
+├── IDL￼
+│    └── msg.proto￼
+├── Makefile￼
+├── go.mod￼
+├── go.sum￼
+├── main.go￼
+└── msg
+		 └── msg.pb.go // 待生成的Go源文件
+```
+
+```makefile
+// ch72/protobuf-make/Makefile
+all: build
+
+build: gen-protobuf
+	go build
+
+gen-protobuf:
+	protoc -I ./IDL msg.proto --gofast_out=./msg
+```
+
+```protobuf
+// ch72/protobuf-make/IDL/msg.proto
+
+syntax = "proto3";
+  
+package msg;
+
+message request {
+        string msgID = 1;
+        string field1 = 2;
+        repeated string field2 = 3;
+}
+```
+
+make命令通过Makefile目标（target）之间的依赖关系实现了在真正构建（go build）之前先生成`msg/msg.pb.go`文件，这样go build执行时就能正常找到msg包的源文件了（生成可执行文件`protobuf-make`）。
+
+```sh
+$ make 
+protoc -I ./IDL msg.proto --gofast_out=./msg
+go build
+```
+
+
+
+> 上述示例基于protobuf描述文件（msg.proto）生成Go源码（msg.pb.go）。这个生成过程依赖两个工具：
+>
+> 一个是protobuf编译器protoc（https://github.com/protocolbuffers/protobuf），
+>
+> 另一个是protobuf go插件protoc-gen-gofast
+>
+> ```sh
+> go install github.com/gogo/protobuf/protoc-gen-gofast@latest
+> ```
+
+#### go generate
+
+Go 1.4版本的Go工具链中也增加了这种在构建之前驱动执行前置动作的能力，这就是`go generate`命令。
+
+```sh
+$ tree protobuf-go-generate 
+protobuf-go-generate
+├── IDL
+│   └── msg.proto
+├── go.mod
+├── go.sum
+├── main.go
+└── msg
+		 └── msg.pb.go // 待生成的Go源文件
+```
+
+```go
+// ch72/protobuf-go-generate/main.go
+
+package main
+
+//go:generate protoc -I ./IDL msg.proto --gofast_out=./msg
+func main() {
+}
+```
+
+删除了Makefile，然后main包的源文件中添加了如下一行特殊的注释。
+
+这就是预先“埋”在代码中的可以被go generate命令识别的**指示符（directive）**。
+
+执行go generate命令时，上面这行指示符中的命令将被go generate识别并被驱动执行，执行的结果就是protoc基于IDL目录下的msg.proto生成了main包所需要的msg包源码。【-x和-v用于查看执行过程】
+
+```sh
+$ go generate -x -v
+main.go
+protoc -I ./IDL msg.proto --gofast_out=./msg
+```
+
+代码生成后，编写相关代码：
+
+```go
+package main
+
+import (
+	"fmt"
+	msg "protobuf-go-generate/msg"
+)
+
+//go:generate protoc -I ./IDL msg.proto --gofast_out=./msg
+func main() {
+	var m = msg.Request{
+		MsgID:  "xxxx",
+		Field1: "field1",
+		Field2: []string{"field2-1", "field2-2"},
+	}
+	fmt.Println(m)
+}
+```
+
+构建并运行程序:
+
+```sh
+$ go build
+$ ./protobuf-go-generate 
+{xxxx field1 [field2-1 field2-2] {} [] 0}
+```
+
+### 72.2 go generate的工作原理
+
+go generate相较于make这样的工具能力和特性比较单一，但“**它是Go工具链内置的，天然适配Go生态系统，无须额外安装其他工具。**”。
+
+go generate并不会按Go语法格式规范去解析Go源码文件，它只是将Go源码文件当成普通文本读取并识别其中可以与下面字符串模式匹配的内容（go generate指示符）：
+
+```go
+//go:generate command arg...
+```
+
+注释符号//前面没有空格，与go:generate之间亦无任何空格。
+
+上面的go generate指示符可以放在Go源文件中的任意位置，并且一个Go源文件中可以有多个go generate指示符，go generate命令会按其出现的顺序逐个识别和执行：1️⃣
+
+```go
+// multi_go_generate_directive.go￼
+
+//go:generate echo "top"
+package main
+
+import "fmt"
+
+//go:generate echo "middle"
+func main() {
+	fmt.Println("hello, go generate")
+}
+
+//go:generate echo "tail"
+```
+
+```sh
+$ go generate multi_go_generate_directive.go 
+top
+middle
+tail
+```
+
+可以像上面示例那样直接将**Go源文件**作为参数传给go generate命令，也可以使用**包**作为go generate的参数。
+
+2️⃣下面的示例演示了不同go generate可接受的不同参数形式：
+
+```sh
+$ tree generate-args 
+generate-args
+├── go.mod
+├── main.go
+├── subpkg1
+│   └── subpkg1.go
+└── subpkg2
+    └── subpkg2.go
+
+```
+
+main.go、subpkg1.go和subpkg2.go三个源文件中都有一行go generate指示符：
+
+```go
+//go:generate pwd
+```
+
+go generate执行该指示符中的命令时会输出当前工作目录（Working Directory）：
+
+```sh
+// 1 传入某个文件
+$ go generate -x -v main.go 
+main.go
+pwd
+/Users/.../gofirst/ch72/generate-args
+
+// 2 传入当前module，匹配到module的main package且仅处理该main package的源文件￼
+$ go generate -x -v
+main.go
+pwd
+/Users/.../gofirst/ch72/generate-args
+
+// 3 传入本地路径，匹配该路径下的包的所有源文件￼
+$ go generate -x -v ./subpkg1 
+subpkg1/subpkg1.go
+pwd
+/Users/.../gofirst/ch72/generate-args/subpkg1
+
+// 4 传入包，由于是module的根路径，因此只处理该module下的main包
+$ go generate -x -v github.com/andyron/generate-args
+main.go
+pwd
+/Users/.../gofirst/ch72/generate-args
+
+// 5 传入包，处理subpkg1包下的所有源文件￼
+$ go generate -x -v github.com/andyron/generate-args/subpkg1
+subpkg1/subpkg1.go
+pwd
+/Users/.../gofirst/ch72/generate-args/subpkg1
+
+// 6 传入./...模式，匹配当前路径及其子路径下的所有包￼
+$ go generate -x -v ./...                                   
+main.go
+pwd
+/Users/.../gofirst/ch72/generate-args
+subpkg1/subpkg1.go
+pwd
+/Users/.../gofirst/ch72/generate-args/subpkg1
+subpkg2/subpkg2.go
+pwd
+/Users/.../gofirst/ch72/generate-args/subpkg2
+```
+
+
+
+3️⃣ go generate还可以通过-run使用正则式去匹配各源文件中go generate指示符中的命令，并仅执行匹配成功的命令：
+
+```sh
+// 未匹配到任何go generate指示符中的命令￼
+$ go generate -x -v -run "protoc" ./...
+```
+
+
+
+### 72.3 go generate的应用场景
+
+上面基于protobuf定义文件（*.proto）生成Go源码文件的示例就是go generate一个极为典型的应用。此外广泛的应用还有：
+
+#### 1 利用stringer工具自动生成枚举类型的String方法
+
+> 安装stringer工具
+>
+> ```
+> go get golang.org/x/tools/cmd/stringer
+> ```
+>
+> or
+>
+> ```sh
+> go install golang.org/x/tools/cmd/stringer
+> ```
+
+
+
+```go
+// enum-demo/main.go￼
+
+type Weekday int
+
+const (
+	Sunday Weekday = iota
+	Monday
+	Tuesday
+	Wednesday
+	Thursday
+	Friday
+	Saturday
+)
+```
+
+通常会为Weekday类型手写String方法，这样在打印上面枚举常量时能输出有意义的内容：
+
+```go
+func (d Weekday) String() string {
+	switch d {
+	case Sunday:
+		return "Sunday"
+	case Monday:
+		return "Monday"
+	case Tuesday:
+		return "Tuesday"
+	case Wednesday:
+		return "Wednesday"
+	case Thursday:
+		return "Thursday"
+	case Friday:
+		return "Friday"
+	case Saturday:
+		return "Saturday"
+	}
+
+	return "Sunday" //default 0 -> "Sunday"
+}
+```
+
+如果一个项目中枚举常量类型有很多，逐个为其手写String方法费时费力。当枚举常量有变化的时候，手动维护String方法十分烦琐且易错。对于这种情况，使用go generate驱动stringer工具为这些枚举类型自动生成String方法的实现不失为一个较为理想的方案。
+
+对上面示例的改造：
+
+```go
+package main
+
+import "fmt"
+
+type Weekday int
+
+const (
+	Sunday Weekday = iota
+	Monday
+	Tuesday
+	Wednesday
+	Thursday
+	Friday
+	Saturday
+)
+
+//go:generate stringer -type=Weekday
+func main() {
+	var d Weekday
+	fmt.Println(d)
+	fmt.Println(Weekday(1))
+}
+```
+
+
+
+```go
+$ go generate main.go 
+```
+
+生成一个weekday_string.go 文件：
+
+```go
+// Code generated by "stringer -type=Weekday"; DO NOT EDIT.
+
+package main
+
+import "strconv"
+
+func _() {
+	// An "invalid array index" compiler error signifies that the constant values have changed.
+	// Re-run the stringer command to generate them again.
+	var x [1]struct{}
+	_ = x[Sunday-0]
+	_ = x[Monday-1]
+	_ = x[Tuesday-2]
+	_ = x[Wednesday-3]
+	_ = x[Thursday-4]
+	_ = x[Friday-5]
+	_ = x[Saturday-6]
+}
+
+const _Weekday_name = "SundayMondayTuesdayWednesdayThursdayFridaySaturday"
+
+var _Weekday_index = [...]uint8{0, 6, 12, 19, 28, 36, 42, 50}
+
+func (i Weekday) String() string {
+	if i < 0 || i >= Weekday(len(_Weekday_index)-1) {
+		return "Weekday(" + strconv.FormatInt(int64(i), 10) + ")"
+	}
+	return _Weekday_name[_Weekday_index[i]:_Weekday_index[i+1]]
+}
+```
+
+编译执行：
+
+```sh
+$ go build
+$ ./enum-demo         
+Sunday
+Monday
+```
+
+
+
+#### 2 go generate驱动从静态资源文件数据到Go源码的转换
+
+语言的优点之一是可以将源码编译成一个对外部没有任何依赖或只有较少依赖的二进制可执行文件，这大大降低了Gopher在部署阶段的心智负担。而为了将这一优势发挥到极致，Go社区甚至开始着手将静态资源文件也嵌入可执行文件中，尤其是在Web开发领域，Gopher希望将一些静态资源文件（比如CSS文件等）嵌入最终的二进制文件中一起发布和部署。
+
+利用go-bindata工具将数据文件嵌入Go源码中。安装：`go get -u github.com/go-bindata/go-bindata/...`或者`go install github.com/go-bindata/go-bindata/v3/go-bindata@latest`。
+
+> 说明：Go 1.16版本内置了静态文件嵌入（embedding）功能，我们可以直接在Go源码中通过`go:embed`指示符将静态资源文件嵌入，无须再使用本方法。
+
+```go
+//go:generate go-bindata -o static.go static/img/go-mascot.jpg
+
+func main() {
+}
+```
+
+```sh
+$ go generate  
+```
+
+go generate命令会执行main.go中指示符中的命令，即基于static/img/go-mascot.jpg文件数据生成static.go源文件。
+
+
+
+```go
+//go:generate go-bindata -o static.go static/img/go-mascot.jpg
+
+func main() {
+	data, err := Asset("static/img/go-mascot.jpg")
+	if err != nil {
+		fmt.Println("Asset invoke error:", err)
+		return
+	}
+
+	http.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
+		w.Write(data)
+	})
+
+	http.ListenAndServe(":8080", nil)
+}
+```
+
+```sh
+$ go build
+./bindata-demo
+```
+
+此时访问localhost:8080可查看图片。
+
+这时即便你删除bindata-demo/static/img目录下的go-mascot.jpg也不会影响到bindata-demo的应答返回结果，因为图片数据已经嵌入bindata-demo这个二进制程序当中了，go-mascot.jpg将随着bindata-demo这个二进制程序一并分发与部署。
+
+### 小结
+
+go generate这个工具通常是由Go包的作者使用和执行的，其生成的Go源码一般会提交到代码仓库中，这个过程对生成的包的使用者来说是透明的。为了提醒使用者这是一个代码自动生成的源文件，我们通常会在源文件的开始处以注释的形式写入类似下面的文字：
+
+```go
+// Code generated by XXX. DO NOT EDIT.
+```
+
