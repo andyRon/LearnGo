@@ -1,0 +1,10 @@
+goos: darwin
+goarch: arm64
+cpu: Apple M1
+BenchmarkStrcat-8   	39749434	        30.23 ns/op	      48 B/op	       1 allocs/op
+BenchmarkStrcat-8   	40009334	        30.11 ns/op	      48 B/op	       1 allocs/op
+BenchmarkStrcat-8   	40216050	        30.07 ns/op	      48 B/op	       1 allocs/op
+BenchmarkStrcat-8   	40436830	        29.93 ns/op	      48 B/op	       1 allocs/op
+BenchmarkStrcat-8   	40060424	        30.05 ns/op	      48 B/op	       1 allocs/op
+PASS
+ok  	command-line-arguments	7.209s

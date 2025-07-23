@@ -2724,27 +2724,143 @@ go-fuzz采用的是**代码覆盖率引导的fuzzing算法**（Coverage-guided f
 
 
 
-## 59 为被测对象建立性能基准 🔖
+## 59 为被测对象建立性能基准
 
-是否优化、何时优化实质上是一个==决策问题==，但==决策不能靠直觉，要靠数据说话==。
+是否优化、何时优化实质上是一个==决策问题==，但==决策不能靠直觉，要靠数据说话==。借用上面名言中的句型：**没有数据支撑的过早决策是万恶之源**。
 
+作为一名Go开发者，我们该如何做出是否对代码进行性能优化的决策呢？可以通过**为被测对象建立性能基准的方式**去获得决策是否优化的支撑数据，同时可以根据这些性能基准数据判断出对代码所做的任何更改是否对代码性能有所影响。
 
+### 59.1 性能基准测试在Go语言中是“一等公民”
 
-### 性能基准测试在Go语言中是“一等公民”
+**性能基准测试在Go语言中是和普通的单元测试一样被原生支持的**，得到的是“一等公民”的待遇。我们可以像对普通单元测试那样在*_test.go文件中创建被测对象的性能基准测试，每个以Benchmark前缀开头的函数都会被当作一个独立的性能基准测试：
 
-
-
-### 顺序执行和并行执行的性能基准测试
-
-
-
-### 使用性能基准比较工具
-
-[benchstat](https://github.com/golang/perf/tree/master/benchstat)
+```go
+func BenchmarkXxx(b *testing.B) {
+  //...
+}
+```
 
 
 
-### 排除额外干扰，让基准测试更精确
+### 59.2 顺序执行和并行执行的性能基准测试
+
+根据是否并行执行，Go的性能基准测试可以分为两类：**顺序执行的性能基准测试和并行执行的性能基准测试**。
+
+#### 1 顺序执行的性能基准测试
+
+其代码写法如下：
+
+```go
+func BenchmarkXxx(b *testing.B) {
+  // ...
+  for i := 0; i < b.N; i++ {
+    // 被测对象的执行代码
+  }
+}
+```
+
+🔖🔖
+
+
+
+
+
+#### 2 并行执行的性能基准测试
+
+```go
+func BenchmarkXxx(b *testing.B) {
+  // ...
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			// 被测对象的执行代码
+		}
+	})
+}
+```
+
+并行执行的基准测试主要用于为包含多goroutine同步设施（如互斥锁、读写锁、原子操作等）的被测代码建立性能基准。相比于顺序执行的基准测试，并行执行的基准测试更能真实反映出多goroutine情况下，被测代码在goroutine同步上的真实消耗。
+
+🔖🔖
+
+### 59.3 使用性能基准比较工具
+
+#### 1 [benchcmp](https://github.com/golang/tools/tree/master/cmd/benchcmp) 【deprecation】
+
+```sh
+go install golang.org/x/tools/cmd/benchcmp@latest
+```
+
+
+
+
+
+不过性能基准测试的输出结果受到很多因素的影响，比如：同一测试的运行次数；性能基准测试与其他正在运行的程序共享一台机器；运行测试的系统本身就在虚拟机上，与其他虚拟机共享硬件；现代机器的一些节能和功率缩放（比如CPU的自动降频和睿频）等。这些因素都会造成即便是对同一个基准测试进行多次运行，输出的结果也可能有较大偏差。但benchcmp工具并不关心这些结果数据在统计学层面是否有效，只对结果做简单比较。
+
+#### 2 [benchstat](https://github.com/golang/perf/tree/master/benchstat)
+
+为了提高对性能基准数据比较的科学性，Go核心团队又开发了benchstat这款工具以替代benchcmp。
+
+```sh
+benchstat old.txt new.txt
+name      old time/op    new time/op   delta￼
+Strcat-8  92.3ns ± 4%   52.2ns ± 6%   -43.43%  (p=0.008 n=5+5
+```
+
+看到，即便old.txt和new.txt中各自有5次运行的数据，benchstat也不会像benchcmp那样输出5行比较结果，而是输出一行经过统计学方法处理后的比较结果。以第二列数据92.3ns ± 4%为例，这是benchcmp对old.txt中的数据进行处理后的结果，其中±4%是样本数据中最大值和最小值距样本平均值的最大偏差百分比。如果这个偏差百分比大于5%，则说明样本数据质量不佳，有些样本数据是不可信的。由此可以看出，这里new.txt中的样本数据是质量不佳的。
+
+benchstat输出结果的最后一列（delta）为两次基准测试对比的变化量。我们看到，采用strings.Join方法连接字符串的平均耗时比采用原生操作符连接字符串短43%，这个指标后面括号中的p=0.008是一个用于衡量两个样本集合的均值是否有显著差异的指标。benchstat支持两种检验算法：一种是UTest（Mann Whitney UTest，曼-惠特尼U检验），UTest是默认的检验算法；另外一种是Welch T检验（TTest）。一般p值小于0.05的结果是可接受的。
+
+
+
+```sh
+$ go test -run=NONE -count 5 -bench . strcat_test.go -benchmem > old_with_mem.txt
+$ go test -run=NONE -count 5 -bench . strcat_test.go -benchmem > new_with_mem.txt
+
+$ benchstat old_with_mem.txt new_with_mem.txt
+goos: darwin
+goarch: arm64
+cpu: Apple M1
+         │ old_with_mem.txt │          new_with_mem.txt           │
+         │      sec/op      │    sec/op     vs base               │
+Strcat-8       47.38n ± ∞ ¹   30.07n ± ∞ ¹  -36.53% (p=0.008 n=5)
+¹ need >= 6 samples for confidence interval at level 0.95
+
+         │ old_with_mem.txt │          new_with_mem.txt          │
+         │       B/op       │    B/op      vs base               │
+Strcat-8        80.00 ± ∞ ¹   48.00 ± ∞ ¹  -40.00% (p=0.008 n=5)
+¹ need >= 6 samples for confidence interval at level 0.95
+
+         │ old_with_mem.txt │          new_with_mem.txt          │
+         │    allocs/op     │  allocs/op   vs base               │
+Strcat-8        2.000 ± ∞ ¹   1.000 ± ∞ ¹  -50.00% (p=0.008 n=5)
+¹ need >= 6 samples for confidence interval at level 0.95
+```
+
+
+
+### 59.4 排除额外干扰，让基准测试更精确
+
+有些复杂的基准测试在真正执行For循环之前或者在每个循环中，除了执行真正的被测代码之外，可能还需要做一些测试准备工作，比如**建立基准测试所需的测试上下文等**。如果不做特殊处理，这些测试准备工作所消耗的时间也会被算入最终结果中，这就会导致最终基准测试的数据受到干扰而不够精确。为此，testing.B中提供了**多种灵活操控基准测试计时器的方法，通过这些方法可以排除掉额外干扰**，让基准测试结果更能反映被测代码的真实性能。
+
+```sh
+$ go test -bench . benchmark_with_expensive_context_setup_test.go 
+goos: darwin
+goarch: arm64
+cpu: Apple M1
+BenchmarkStrcatWithTestContextSetup-8                   25617231                39.55 ns/op
+BenchmarkStrcatWithTestContextSetupAndResetTimer-8      37295137                30.54 ns/op
+BenchmarkStrcatWithTestContextSetupAndRestartTimer-8    37561339                31.29 ns/op
+BenchmarkStrcat-8                                       39039942                31.76 ns/op
+PASS
+ok      command-line-arguments  11.767s
+
+```
+
+如果不通过testing.B提供的计数器控制接口对测试上下文带来的消耗进行隔离，最终基准测试得到的数据（BenchmarkStrcatWithTestContextSetup）将偏离准确数据（BenchmarkStrcat）很远。而通过testing.B提供的计数器控制接口对测试上下文带来的消耗进行隔离后，得到的基准测试数据（BenchmarkStrcatWithTestContextSetupAndResetTimer和Bench-markStrcatWithTestContextSetupAndRestartTimer）则非常接近真实数据。
+
+### 小结
+
+无论你是否认为性能很重要，都请你为被测代码（尤其是位于系统关键业务路径上的代码）建立性能基准。如果你编写的是供其他人使用的软件包，则更应如此。只有这样，我们才能至少保证后续对代码的修改不会带来性能回退。已经建立的性能基准可以为后续是否进一步优化的决策提供数据支撑，而不是靠程序员的直觉。
 
 
 
