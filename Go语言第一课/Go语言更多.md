@@ -3643,7 +3643,7 @@ Go是自带运行时的跨平台编程语言，Go中暴露给语言使用者的T
 
 
 
-## 64 使用net/http包实现安全通信
+## 64 使用net/http包实现安全通信 🔖
 
 
 
@@ -3653,9 +3653,30 @@ Go是自带运行时的跨平台编程语言，Go中暴露给语言使用者的T
 
 HTTPS协议就是用来解决传统HTTP协议明文传输不安全的问题的。与普通HTTP协议不同，HTTPS协议在传输层（TCP协议）和应用层（HTTP协议）之间增加了一个==安全传输层==：
 
+![](images/image-20250724123229454.png)
+
+安全传输层通常采用**SSL（Secure Socket Layer）**或**TLS（Transport Layer Security）**协议实现（Go标准库支持TLS 1.3版本协议）。这一层负责HTTP协议传输的**内容加密、通信双方身份验证**等。有了这一层后，HTTP协议就摇身一变，成为拥有**加密、证书身份验证和内容完整性保护功能**的HTTPS协议了。或者反过来说，==HTTPS协议就是在安全传输层上运行的HTTP协议==。
+
+
+
+用openssl工具可以生成该示例中HTTPS Web服务所需的server.key和server.crt，并让这个示例中的服务运行起来：
+
+```sh
+$ openssl genrsa -out server.key 2048
+$ openssl req -new -x509 -key server.key -out server.crt -days 365
+```
+
+
+
+
+
 
 
 ### 64.2 HTTPS安全传输层的工作机制
+
+
+
+![](images/image-20250724124600204.png)
 
 
 
@@ -3663,11 +3684,35 @@ HTTPS协议就是用来解决传统HTTP协议明文传输不安全的问题的�
 
 
 
+![](images/image-20250724124658281.png)
+
+
+
+
+
+![](images/image-20250724124801528.png)
+
+
+
+
+
 ### 64.4 对服务端公钥证书的校验
 
 
 
+
+
+
+
+
+
 ### 64.5 对客户端公钥证书的校验
+
+
+
+
+
+
 
 
 
