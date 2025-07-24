@@ -3225,9 +3225,25 @@ ok      gofirst/ch60pprof/2/step2       1.916s
 
 ## 61 使用expvar输出度量数据，辅助定位性能瓶颈点
 
-### expvar包的工作原理
+上一条提到，要想对Go应用存在的**性能瓶颈进行剖析**，首先就要对不同类型的性能数据进行收集和采样。
 
-Go标准库中的expvar包提供了一种**输出应用内部状态信息的标准化方案**：
+有两种收集和采样数据的方法。在微观层面，采用通过运行性能基准测试收集和采样数据的方法，这种方法适用于**定位函数或方法实现**中存在性能瓶颈点的情形；在宏观层面，采用独立程序收集和采样数据的方法。但通过独立程序进行性能数据采样时，往往很难快速捕捉到真正的瓶颈点，尤其是对于那些**内部结构复杂、业务逻辑过多、内部有较多并发的**Go程序。我们在对这样的程序进行性能采样时，真正的瓶颈点很可能被其他数据遮盖。
+
+那么**如何能更高效地捕捉到应用的性能瓶颈点呢**？
+
+需要知道Go应用运行状态（一般以**度量数据**的形式呈现）。通过了解应用**关键路径**上的度量数据，可以确定在某个度量点上应用的性能是符合预期性能指标还是较大偏离预期，这样就可以最大限度地缩小性能瓶颈点的搜索范围，从而快速定位应用中的瓶颈点并进行优化。
+
+这些可以反映应用运行状态的数据也被称为应用的==内省（introspection）数据==。相比于通过查询应用外部特征而获取的==探针类（probing）数据==（比如查看应用某端口是否有响应并返回正确的数据或状态码），内省数据可以传达更为丰富、更多的有关应用程序状态的上下文信息。这些上下文信息可以是应用**对各类资源的占用信**息，比如应用运行占用了多少内存空间，也可以是**自定义的性能指标信息**，比如<u>单位时间处理的外部请求数量、应答延迟、队列积压量等</u>。
+
+传统编程语言（如C++、Java等）并没有内置输出应用状态度量数据的设施（接口方式、指标定义方法、数据输出格式等），需要开发者自己通过编码实现或利用第三方库实现。
+
+Go标准库提供的`expvar`包可以**按统一接口、统一数据格式、一致的指标**定义方法输出自定义的度量数据。
+
+> `expvar` 包的全称是 **Exported Variables**（导出变量）。其核心功能：**将 Go 程序内部的运行时变量（如计数器、内存状态、自定义指标）以标准化方式导出**，供外部监控系统访问和分析。
+
+### 61.1 expvar包的工作原理
+
+Go标准库中的expvar包提供了一种**输出应用内部状态信息的==标准化方案==**：
 
 - 数据输出接口形式；  
 - 输出数据的编码格式；
@@ -3235,23 +3251,148 @@ Go标准库中的expvar包提供了一种**输出应用内部状态信息的标�
 
 ![](images/image-20250413104838953.png)
 
+导入expvar：
+
+```go
+import _ "expvar"
+```
+
+和net/http/pprof类似，expvar包也在自己的init函数中向http包的默认请求“路由器”`DefaultServeMux`🔖注册一个服务端点/debug/vars：
+
+```
+/ $GOROOT/src/expvar/expvar.go
+
+func init() {
+	http.HandleFunc("/debug/vars", expvarHandler)
+	...
+}
+```
+
+这个服务端点就是expvar提供给外部的获取应用内部状态的**唯一标准接口**，外部工具（无论是命令行还是基于Web的图形化程序）都可以通过标准的http get请求从该服务端点获取应用内部状态数据。
+
+```go
+package main
+
+import (
+	_ "expvar"
+	"fmt"
+	"net/http"
+)
+
+func main() {
+	http.Handle("/hi", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("hi"))
+	}))
+	fmt.Println(http.ListenAndServe("localhost:8080", nil))
+}
+
+// http://localhost:8080/debug/vars
+```
 
 
-### 自定义应用通过expvar输出的度量数据
+
+```go
+// 手动将expvar包的服务端点注册到应用程序所使用的“路由器”上
+func main() {
+	mux := http.NewServeMux()
+	mux.Handle("/hi", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("hi2"))
+	}))
+	mux.Handle("/debug/vars", expvar.Handler())
+	fmt.Println(http.ListenAndServe("localhost:8080", mux))
+}
+```
+
+
+
+如果应用程序本身并没有启动HTTP服务，那么还需在一个单独的goroutine中启动一个HTTP服务，这样expvar提供的服务才能有效。
+
+
+
+```json
+{
+  "cmdline": [
+  "/var/folders/8k/ntbhdf615p34cflx1_qwv38r0000gn/T/go-build899428462/b001/exe/expvar_demo2"
+  ],
+  "memstats": {
+    "Alloc": 272512,
+    "TotalAlloc": 272512,
+    "Sys": 6966288,
+    "Lookups": 0,
+    "Mallocs": 1201,
+    "Frees": 90,
+    "HeapAlloc": 272512,
+    "HeapSys": 3899392,
+    ...
+  }
+}
+```
+
+在默认返回的状态数据中包含了两个字段：cmdline和memstats。这两个输出数据是expvar包在init函数中就已经发布（Publish）了的变量：
+
+```go
+//$GOROOT/src/expvar/expvar.go
+
+func init() {
+  http.HandleFunc("/debug/vars", expvarHandler)
+  Publish("cmdline", Func(cmdline))
+  Publish("memstats", Func(memstats))
+}
+```
+
+cmdline字段的含义是输出数据的应用名，这里因为是通过go run运行的应用，所以cmdline的值是一个临时路径下的应用。
+
+而memstats输出的数据对应的是`runtime.Memstats`结构体，反映的是应用在**运行期间堆内存分配、栈内存分配及GC的状态**。runtime.Memstats结构体的字段可能会随着Go版本的演进而发生变化，其字段具体含义可以参考Memstats结构体中的注释。
+
+### 61.2 自定义应用通过expvar输出的度量数据
+
+上文两个标准：
 
 - 标准的接口：通过http get（默认从/debug/vars服务端点获取数据）。
 - 标准的数据编码格式：JSON。
 
+第三个标准：
 
+- 自定义输出的度量数据的标准方法。
 
+在图48-1中我们发现，从debug/vars服务端点获取到的JSON结果数据中有一个名为custom_var的字段，这是一个自定义的度量数据。
 
+通过在init函数中添加发布函数，而添加到返回结果中：
 
-### 输出数据的展示
+```go
+func init() {￼     expvar.Publish("custom_var", customVar)￼ }
+```
 
+expvar包提供了Publish函数，该函数用于发布通过debug/vars服务端点输出的数据，上面expvar内置输出的cmdline和memstats就是通过Publish函数发布的。Publish函数的原型如下：
 
+```go
+// $GOROOT/src/expvar/expvar.go
+func Publish(name string, v Var)
+
+type Var interface {
+  String() string
+}
+```
+
+`name`是对应字段在输出结果中的字段名，而v是字段值，类型为接口`Var`。
+所有实现了`Var`接口类型的变量都可以被发布并作为输出的应用内部状态的一部分。
+
+🔖
+
+### 61.3 输出数据的展示
+
+JSON格式文本很容易反序列化，开发者可自行解析后使用，比如：编写一个Prometheus exporter，将数据导入Prometheus背后的存储（比如InfluxDB）中，并利用一些基于Web图形化的方式直观展示出来；或者导入Elasticsearch，再通过Kibana或Grafana的页面展示出来。
+
+Go开发者Ivan Daniluk开发了一款名为expvarmon的开源工具，该工具支持将从expvar输出的数据以基于终端的图形化方式展示出来。
 
 ```sh
-go get github.com/divan/expvarmon
+go install github.com/divan/expvarmon
+```
+
+运行expvar_demo6，然后运行：
+
+```sh
+$ expvarmon -ports="8080" -vars="custom:customVar.field1,custom:customVar.field2,mem:memstats.Alloc,mem:memstats.Sys,mem:memstats.HeapAlloc,mem:memstats.HeapInuse,duration:memstats.PauseNs,duration:memstats.PauseTotalNs"
 ```
 
 
