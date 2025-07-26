@@ -18,11 +18,11 @@ func main() {
 	defer broker.Close()
 
 	// 启动生产者
-	go producer(broker)
+	go producer2(broker)
 
 	// 启动多个消费者
 	for i := 1; i <= 3; i++ {
-		go consumer(broker, i)
+		go consumer2(broker, i)
 	}
 
 	// 等待一段时间，确保消息处理完成
@@ -79,7 +79,7 @@ func (b *Broker) Close() {
 }
 
 // 生产者函数，发布消息
-func producer(broker *Broker) {
+func producer2(broker *Broker) {
 	for i := 0; i < 5; i++ {
 		broker.Publish("topic1", i)
 		fmt.Printf("Published: %d\n", i)
@@ -88,7 +88,7 @@ func producer(broker *Broker) {
 }
 
 // 消费者函数，订阅消息
-func consumer(broker *Broker, id int) {
+func consumer2(broker *Broker, id int) {
 	ch := broker.Subscribe("topic1")
 	for msg := range ch {
 		fmt.Printf("Consumer %d received: %v\n", id, msg)

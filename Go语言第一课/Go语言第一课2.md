@@ -1613,11 +1613,11 @@ channel既可以用来实现Goroutine间的==通信==，还可以实现Goroutine
 
 ### 33.1 作为一等公民的channel
 
-意味着可以像使用普通变量那样使用channel。
+意味着可以像使用普通变量那样使用channel，比如，<u>定义channel类型变量、给channel变量赋值、将channel作为参数传递给函数/方法、将channel作为返回值从函数/方法中返回，甚至将channel发送到其他channel中</u>。
 
 #### 创建channel
 
-和切片、结构体、map等一样，channel也是一种复合数据类型。也就是说，我们在声明一个channel类型变量时，必须给出其**具体的元素类型**。
+和切片、结构体、map等一样，channel也是一种**复合数据类型**。也就是说，在声明一个channel类型变量时，必须给出其**具体的元素类型**。
 
 ```go
 var ch chan int  // 声明了一个元素为int类型的channel类型变量ch
@@ -2419,15 +2419,15 @@ sync包中的低级同步原语各有各的擅长领域：
 
 **Goroutine的开销虽然“廉价”，但也不是免费的**。
 
-最明显的，一旦规模化后，这种非零成本也会成为瓶颈。我们以一个Goroutine分配2KB执行栈为例，100w Goroutine就是2GB的内存消耗。
+最明显的，一旦规模化后，这种非零成本也会成为瓶颈。以一个Goroutine分配2KB执行栈为例，100w Goroutine就是2GB的内存消耗。
 
-其次，Goroutine从[Go 1.4版本](https://go.dev/doc/go1.4)开始采用了连续栈的方案，也就是每个Goroutine的执行栈都是一块连续内存，如果空间不足，运行时会分配一个更大的连续内存空间作为这个Goroutine的执行栈，将原栈内容拷贝到新分配的空间中来。
+其次，Goroutine从[Go 1.4版本](https://go.dev/doc/go1.4)开始采用了**连续栈**的方案，也就是每个Goroutine的执行栈都是一块连续内存，如果空间不足，运行时会分配一个更大的连续内存空间作为这个Goroutine的执行栈，将原栈内容拷贝到新分配的空间中来。
 
 连续栈的方案，虽然能避免Go 1.3采用的分段栈会导致的[“hot split”问题](https://docs.google.com/document/d/1wAaf1rYoM4S4gtnPh0zOlGzWtrZFQ5suE8qr2sD8uWQ/pub)，但连续栈的原理也决定了，一旦Goroutine的执行栈发生了grow，那么即便这个Goroutine不再需要那么大的栈空间，这个Goroutine的栈空间也不会被Shrink（收缩）了，这些空间可能会处于长时间闲置的状态，直到Goroutine退出。
 
 另外，随着Goroutine数量的增加，Go运行时进行Goroutine调度的处理器消耗，也会随之增加，成为阻碍Go应用性能提升的重要因素。
 
-面对这样的问题，**Goroutine池**就是一种常见的解决方案。这个方案的核心思想是对Goroutine的==重用==，也就是把M个计算任务调度到N个Goroutine上，而不是为每个计算任务分配一个独享的Goroutine，从而提高计算资源的利用率。
+面对这样的问题，**Goroutine池**就是一种常见的解决方案。这个方案的核心思想是对Goroutine的==重用==，也就是<u>把M个计算任务调度到N个Goroutine上，而不是为每个计算任务分配一个独享的Goroutine</u>，从而提高计算资源的利用率。
 
 ### 35.2 workerpool的实现原理
 
