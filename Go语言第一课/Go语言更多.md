@@ -2478,7 +2478,11 @@ $ find /usr/local/go/src  -name "*_test.go" | xargs grep package | grep ':packag
 
 ## 54 有层次地组织测试代码
 
-### 经典模式——平铺
+### 54.1 经典模式——平铺
+
+go test并没有对测试代码的组织提出任何约束条件。
+
+以标准库strings包为例：
 
 ```sh
 cd /usr/local/go/src/strings
@@ -2538,10 +2542,14 @@ ok      strings 1.100s
 
 ```
 
+以strings包的Compare函数为例，与之对应的测试函数有三个：TestCompare、TestCompareIdenticalString和TestCompareStrings。这些测试函数各自独立，测试函数之间没有层级关系，**所有测试平铺在顶层**。测试函数名称**既用来区分测试，又用来关联测试**。
 
+我们通过测试函数名的前缀才会知道，TestCompare、TestCompareIdenticalString和TestCompareStrings三个函数是针对strings包Compare函数的测试。
+
+选项-run提供正则表达式来匹配并选择执行哪些测试函数。
 
 ```sh
-# go test -run=TestCompare -v .
+$ go test -run=TestCompare -v .
 === RUN   TestCompare
 --- PASS: TestCompare (0.00s)
 === RUN   TestCompareIdenticalString
@@ -2559,9 +2567,7 @@ ok    strings     0.088s
 - 简单：没有额外的抽象，上手容易。
 - 独立：每个测试函数都是独立的，互不关联，避免相互干扰。
 
-
-
-### xUnit家族模式
+### 54.2 xUnit家族模式
 
 在Java、Python、C#等主流编程语言中，测试代码的组织形式深受由极限编程倡导者Kent Beck和Erich Gamma建立的xUnit家族测试框架（如JUnit、PyUnit等）的影响。
 
@@ -2569,23 +2575,87 @@ ok    strings     0.088s
 
 这种测试代码组织形式主要有==测试套件（Test Suite）==和==测试用例（Test Case）==两个层级。
 
-一个测试工程（Test Project）由若干个测试套件组成，而每个测试套件又包含多个测试用例。
+一个**测试工程（Test Project）**由若干个测试套件组成，而每个测试套件又包含多个测试用例。
 
+Go 1.7中加入的对subtest的支持让我们在Go中也可以使用上面这种方式组织Go测试代码。之前版本不可以。对标准库strings包的部分测试代码组织形式改造一下：
 
+```go
+// ch54/compare_test.go
+
+package strings_test
+
+...
+
+func testCompare(t *testing.T) {
+	...
+}
+
+func testCompareIdenticalString(t *testing.T) {
+	...
+}
+
+func testCompareStrings(t *testing.T) {
+	...
+}
+
+func TestCompare(t *testing.T) {
+	t.Run("Compare", testCompare)
+	t.Run("CompareString", testCompareStrings)
+	t.Run("CompareIdenticalString", testCompareIdenticalString)
+}
+
+// ch54/builder_test.go
+
+package strings_test
+
+...
+
+func check(t *testing.T, b *strings.Builder, want string) {
+	...
+}
+
+func testBuilder(t *testing.T) {
+	...
+}
+
+func testBuilderString(t *testing.T) {
+	...
+}
+
+func testBuilderReset(t *testing.T) {
+	...
+}
+
+func testBuilderGrow(t *testing.T) {
+	...
+}
+
+func TestBuilder(t *testing.T) {
+	t.Run("TestBuilder", testBuilder)
+	t.Run("TestBuilderString", testBuilderString)
+	t.Run("TestBuilderReset", testBuilderReset)
+	t.Run("TestBuilderGrow", testBuilderGrow)
+}
+
+```
+
+改造前后测试代码的组织结构对比:
 
 ![](images/image-20250413101147104.png)
 
+改造后的名字形如TestXxx的测试函数对应着测试套件，一般针对被测包的一个导出函数或方法的所有测试都放入一个测试套件中。平铺模式下的测试函数TestXxx都改名为testXxx，并作为测试套件对应的测试函数内部的子测试（subtest）。
+
+原先的TestBuilderString变为了testBuilderString。这样的一个子测试等价于一个测试用例。
+
+通过对比，仅通过查看测试套件内的子测试（测试用例）即可全面了解到究竟对被测函数/方法进行了哪些测试。仅仅增加了一个层次，测试代码的组织就更加清晰了。
 
 
-🔖
 
-
-
-### 测试固件
+### 54.3 测试固件
 
 ==测试固件（test fixture）==是指一个人造的、确定性的环境，一个测试用例或一个测试套件（下的一组测试用例）在这个环境中进行测试，其测试结果是可重复的（多次测试运行的结果是相同的）。
 
-一般使用setUp和tearDown来代表测试固件的创建/设置与拆除/销毁的动作。
+一般使用`setUp`和`tearDown`来代表测试固件的**创建/设置与拆除/销毁**的动作。
 
 使用测试固件的常见场景：
 
@@ -2593,7 +2663,165 @@ ok    strings     0.088s
 - 复制一组特定的已知文件，测试结束后清除这些文件；
 - 创建伪对象（fake object）或模拟对象（mock object），并为这些对象设定测试时所需的特定数据和期望结果。
 
-🔖
+
+
+```go
+func setUp(testName string) func() {
+	fmt.Printf("\tsetUp fixture for %s\n", testName)
+	return func() {
+		fmt.Printf("\ttearDown fixture for %s\n", testName)
+	}
+}
+
+func TestFunc1(t *testing.T) {
+	defer setUp(t.Name())()
+	fmt.Printf("\tExecute test: %s\n", t.Name())
+}
+
+func TestFunc2(t *testing.T) {
+	defer setUp(t.Name())()
+	fmt.Printf("\tExecute test: %s\n", t.Name())
+}
+
+func TestFunc3(t *testing.T) {
+	defer setUp(t.Name())()
+	fmt.Printf("\tExecute test: %s\n", t.Name())
+}
+```
+
+```sh
+$ go test -v classic_testfixture_test.go 
+=== RUN   TestFunc1
+        setUp fixture for TestFunc1
+        Execute test: TestFunc1
+        tearDown fixture for TestFunc1
+--- PASS: TestFunc1 (0.00s)
+=== RUN   TestFunc2
+        setUp fixture for TestFunc2
+        Execute test: TestFunc2
+        tearDown fixture for TestFunc2
+--- PASS: TestFunc2 (0.00s)
+=== RUN   TestFunc3
+        setUp fixture for TestFunc3
+        Execute test: TestFunc3
+        tearDown fixture for TestFunc3
+--- PASS: TestFunc3 (0.00s)
+PASS
+ok      command-line-arguments  0.438s
+```
+
+上面的示例**在运行每个测试函数TestXxx时，都会先通过setUp函数建立测试固件，并在defer函数中注册测试固件的销毁函数，以保证在每个TestXxx执行完毕时为之建立的测试固件会被销毁，使得各个测试函数之间的测试执行互不干扰。**
+
+在Go 1.14版本以前，测试固件的setUp与tearDown一般实现格式：
+
+```go
+func setUp() func() {
+	...
+	return func() {
+	}
+}
+
+func TestXxx(t *testing.T) {
+	defer setUp()()
+	...
+}
+```
+
+在setUp中返回匿名函数来实现tearDown的好处是，可以在setUp中利用闭包特性在两个函数间共享一些变量，避免了包级变量的使用。
+
+Go 1.14版本testing包增加了testing.Cleanup方法，为测试固件的销毁提供了包级原生的支持：
+
+```go
+func setUp() func() {
+	...
+	return func() {
+	}
+}
+
+func TestXxx(t *testing.T) {
+  t.Cleanup(setUp())
+	...
+}
+```
+
+有些时候，我们需要将所有测试函数放入一个更大范围的测试固件环境中执行，这就是==包级别测试固件==。在Go 1.4版本以前，我们仅能在init函数中创建测试固件，而无法销毁包级别测试固件。Go 1.4版本引入了TestMain，使得包级别测试固件的创建和销毁终于有了正式的施展舞台。示例：
+
+```go
+// 包级别测试固件
+
+// Go 1.14版本testing包增加了testing.Cleanup方法，为测试固件的销毁提供了包级原生的支持
+// Go 1.4版本引入了TestMain，使得包级别测试固件的创建和销毁终于有了正式的施展舞台。
+
+func setUp(testName string) func() {
+	fmt.Printf("\tsetUp fixture for %s\n", testName)
+	return func() {
+		fmt.Printf("\ttearDown fixture for %s\n", testName)
+	}
+}
+
+func TestFunc1(t *testing.T) {
+	t.Cleanup(setUp(t.Name()))
+	fmt.Printf("\tExecute test: %s\n", t.Name())
+}
+
+func TestFunc2(t *testing.T) {
+	t.Cleanup(setUp(t.Name()))
+	fmt.Printf("\tExecute test: %s\n", t.Name())
+}
+
+func TestFunc3(t *testing.T) {
+	t.Cleanup(setUp(t.Name()))
+	fmt.Printf("\tExecute test: %s\n", t.Name())
+}
+
+func pkgSetUp(pkgName string) func() {
+	fmt.Printf("package SetUp fixture for %s\n", pkgName)
+	return func() {
+		fmt.Printf("package TearDown fixture for %s\n", pkgName)
+	}
+}
+
+func TestMain(m *testing.M) {
+	defer pkgSetUp("package demo_test")()
+	m.Run()
+}
+```
+
+```sh
+$ go test -v classic_package_level_testfixture_test.go 
+package SetUp fixture for package demo_test
+=== RUN   TestFunc1
+        setUp fixture for TestFunc1
+        Execute test: TestFunc1
+        tearDown fixture for TestFunc1
+--- PASS: TestFunc1 (0.00s)
+=== RUN   TestFunc2
+        setUp fixture for TestFunc2
+        Execute test: TestFunc2
+        tearDown fixture for TestFunc2
+--- PASS: TestFunc2 (0.00s)
+=== RUN   TestFunc3
+        setUp fixture for TestFunc3
+        Execute test: TestFunc3
+        tearDown fixture for TestFunc3
+--- PASS: TestFunc3 (0.00s)
+PASS
+package TearDown fixture for package demo_test
+ok      command-line-arguments  0.470s
+
+```
+
+结果显示，**在所有测试函数运行之前，包级别测试固件被创建；在所有测试函数运行完毕后，包级别测试固件被销毁**。
+
+用图来总结（带测试固件的）平铺模式下的测试执行流。
+
+![](images/image-20250801174006639.png)
+
+
+
+有些时候，一些测试函数所需的测试固件是相同的，在平铺模式下为每个测试函数都单独创建/销毁一次测试固件就显得有些重复和冗余。在这样的情况下，我们可以尝试采用测试套件来减少测试固件的重复创建。
+
+![](images/image-20250801174452469.png)
 
 ## 55 优先编写表驱动的测试
 
@@ -2601,33 +2829,224 @@ ok    strings     0.088s
 
 这章将聚焦于**测试函数的内部代码该如何编写**。
 
-### Go测试代码的一般逻辑
+### 55.1 Go测试代码的一般逻辑
 
+Go的测试函数就是一个普通的Go函数，Go仅对测试函数的**函数名和函数原型**有特定要求，对在测试函数`TestXxx`或其子测试函数（subtest）中如何编写测试逻辑并没有显式的约束。
 
+对测试失败与否的判断在于测试代码逻辑是否进入了包含`Error/Errorf`、`Fatal/Fatalf`等方法调用的代码分支。一旦进入这些分支，即代表该测试失败。不同的是Error/Errorf并不会立刻终止当前goroutine的执行，还会继续执行该goroutine后续的测试，而Fatal/Fatalf则会立刻停止当前goroutine的测试执行。
+
+```go
+func TestCompare(t *testing.T) {
+	var a, b string
+	var i int
+
+	a, b = "", ""
+	i = 0
+	cmp := strings.Compare(a, b)
+	if cmp != i {
+		t.Errorf("want %v, but Compare(%q, %q) = %v", i, a, b, cmp)
+	}
+
+	a, b = "a", ""
+	i = 1
+	cmp = strings.Compare(a, b)
+	if cmp != i {
+		t.Errorf("want %v, but Compare(%q, %q) = %v", i, a, b, cmp)
+	}
+
+	a, b = "", "a"
+	i = -1
+	cmp = strings.Compare(a, b)
+	if cmp != i {
+		t.Errorf("want %v, but Compare(%q, %q) = %v", i, a, b, cmp)
+	}
+}
+```
 
 Go测试代码的一般逻辑是==针对给定的输入数据，比较被测函数/方法返回的实际结果值与预期值，如有差异，则通过testing包提供的相关函数输出差异信息。==
 
-### 表驱动的测试实践
+### 55.2 表驱动的测试实践
 
+```go
+func TestCompare2(t *testing.T) {
+	compareTests := []struct {
+		a, b string
+		i    int
+	}{
+		{"", "", 0},
+		{"a", "", 1},
+		{"", "a", -1},
+	}
+	for _, tt := range compareTests {
+		cmp := strings.Compare(tt.a, tt.b)
+		if cmp != tt.i {
+			t.Errorf("want %v, but Compare(%q, %q) = %v", tt.i, tt.a, tt.b, cmp)
+		}
+	}
+}
 
+```
+
+改进，将预置的输入数据放入一个自定义结构体类型的切片中。
 
 无须改动后面的测试逻辑，只需在切片中增加数据条目即可。在这种测试设计中，这个自定义结构体类型的切片（上述示例中的compareTests）就是一个表（自定义结构体类型的字段就是列），而基于这个数据表的测试设计和实现则被称为“**表驱动的测试**”。
 
-### 表驱动测试的优点
+### 55.3 表驱动测试的优点
 
-表驱动测试本身是编程语言无关的。
+表驱动测试本身是编程语言无关的。Go核心团队和Go早期开发者在实践过程中发现表驱动测试十分适合Go代码测试并在标准库和第三方项目中大量使用此种测试设计，这样表驱动测试也就逐渐成为Go的一个惯用法。
+
+优点：
 
 - 简单和紧凑
+
 - 数据即测试
-- 结合子测试后，可单独运行某个数据项的测试
 
-### 表驱动测试实践中的注意事项
+  表驱动测试的实质是数据驱动的测试，扩展输入数据集即扩展测试。通过扩展数据集，我们可以很容易地实现提高被测目标测试覆盖率的目的。
 
-- 表的实现方式
-- 测试失败时的数据项的定位
-- Errorf还是Fatalf
+- 结合**子测试**后，可单独运行某个数据项的测试
 
-## 56 使用testdata管理测试依赖的外部数据文件🔖
+```go
+// 表驱动测试与子测试（subtest）结合
+
+func TestCompare4(t *testing.T) {
+	compareTests := []struct {
+		name, a, b string
+		i          int
+	}{
+		{`compareTwoEmptyString`, "", "", 0},
+		{`compareSecondParamIsEmpty`, "a", "", 1},
+		{`compareFirstParamIsEmpty`, "", "a", -1},
+	}
+
+	for _, tt := range compareTests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmp := strings.Compare(tt.a, tt.b)
+			if cmp != tt.i {
+				t.Errorf(`want %v, but Compare(%q, %q) = %v`, tt.i, tt.a, tt.b, cmp)
+			}
+		})
+	}
+}
+```
+
+测试结果的判定逻辑放入一个单独的子测试中，这样可以单独执行表中某项数据的测试。比如：单独执行表中第一个数据项对应的测试：
+
+```sh
+$ go test -v -run /TwoEmptyString table_driven_strings_with_subtest_test.go 
+=== RUN   TestCompare4
+=== RUN   TestCompare4/compareTwoEmptyString
+--- PASS: TestCompare4 (0.00s)
+    --- PASS: TestCompare4/compareTwoEmptyString (0.00s)
+PASS
+ok      command-line-arguments  0.278s
+
+```
+
+
+
+综上，**建议在编写Go测试代码时优先编写基于表驱动的测试。**
+
+### 55.4 表驱动测试实践中的注意事项
+
+#### 1 表的实现方式
+
+表除了用自定义结构体的切片实现的，表也可以使用基于自定义结构体的其他**集合类型**（如map）来实现。
+
+
+
+**不过使用map作为数据表时要注意，表内数据项的测试先后顺序是不确定的。**
+
+#### 2 测试失败时的数据项的定位
+
+对于非表驱动的测试，在测试失败时，往往通过失败点所在的行数即可判定究竟是哪块测试代码未通过：
+
+```sh
+$ go test -v non_table_driven_strings_test.go
+=== RUN   TestCompare
+    non_table_driven_strings_test.go:18: want 1, but Compare("", "") = 0
+--- FAIL: TestCompare (0.00s)
+FAIL
+FAIL    command-line-arguments  0.387s
+FAIL
+```
+
+但在表驱动的测试中，由于一般情况下表驱动的测试的测试结果成功与否的判定逻辑是共享的，因此再通过行数来定位问题就不可行了，因为无论是表中哪一项导致的测试失败，失败结果中输出的引发错误的行号都是相同的：
+
+```shell
+$ go test -v table_driven_strings_test.go
+=== RUN   TestCompare2
+    table_driven_strings_test.go:20: want 1, but Compare("", "") = 0
+    table_driven_strings_test.go:20: want 6, but Compare("a", "") = 1
+    table_driven_strings_test.go:20: want 0, but Compare("", "a") = -1
+--- FAIL: TestCompare2 (0.00s)
+=== RUN   TestCompare3
+--- PASS: TestCompare3 (0.00s)
+FAIL
+FAIL    command-line-arguments  0.276s
+FAIL
+```
+
+
+
+需要在测试失败的输出结果中输出数据表项的**唯一标识**。最简单的方法是通过输出数据表项在数据表中的**偏移量**来辅助定位“元凶”：
+
+```go
+func TestCompare6(t *testing.T) {
+	compareTests := []struct {
+		a, b string
+		i    int
+	}{
+		{"", "", 7},
+		{"a", "", 6},
+		{"", "a", -1},
+	}
+
+	for i, tt := range compareTests {
+		cmp := strings.Compare(tt.a, tt.b)
+		if cmp != tt.i {
+			t.Errorf(`[table offset: %v] want %v, but Compare(%q, %q) = %v`, i+1, tt.i, tt.a, tt.b, cmp)
+		}
+	}
+}
+```
+
+
+
+```sh
+$ go test -v table_driven_strings_by_offset_test.go 
+=== RUN   TestCompare6
+    table_driven_strings_by_offset_test.go:23: [table offset: 1] want 7, but Compare("", "") = 0
+    table_driven_strings_by_offset_test.go:23: [table offset: 2] want 6, but Compare("a", "") = 1
+--- FAIL: TestCompare6 (0.00s)
+FAIL
+FAIL    command-line-arguments  0.433s
+FAIL
+
+```
+
+一个更直观的方式是使用名字来区分不同的数据项：
+
+```sh
+$ go test -v table_driven_strings_by_name_test.go  
+=== RUN   TestCompare7
+    table_driven_strings_by_name_test.go:23: [compareTwoEmptyString] want 7, but Compare("", "") = 0
+    table_driven_strings_by_name_test.go:23: [compareSecondStringEmpty] want 6, but Compare("a", "") = 1
+--- FAIL: TestCompare7 (0.00s)
+FAIL
+FAIL    command-line-arguments  0.433s
+FAIL
+
+```
+
+
+
+#### 3 Errorf还是Fatalf
+
+一般而言，如果一个数据项导致的测试失败不会对后续数据项的测试结果造成影响，那么推荐Errorf，这样可以通过执行一次测试看到所有导致测试失败的数据项；否则，如果数据项导致的测试失败会直接影响到后续数据项的测试结果，那么可以使用Fatalf让测试尽快结束，因为继续执行的测试的意义已经不大了。
+
+
+
+## 56 使用testdata管理测试依赖的外部数据文件
 
 
 
