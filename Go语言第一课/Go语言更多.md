@@ -3048,23 +3048,52 @@ FAIL
 
 ## 56 使用testdata管理测试依赖的外部数据文件
 
+测试固件是Go测试执行所需的上下文环境，其中测试依赖的**外部数据**文件就是一种常见的测试固件（可以理解为静态测试固件，因为无须在测试代码中为其单独编写固件的创建和清理辅助函数）。
 
+一些包含文件I/O的包的测试中，我们经常需要从外部数据文件中加载数据或向外部文件写入结果数据以满足测试固件的需求。
 
-### testdata目录
+其他主流编程语言中，如何管理测试依赖的外部数据文件往往是由程序员自行决定的，但Go语言是一门面向软件工程的语言。从工程化的角度出发，Go的设计者们将一些在传统语言中由程序员自身习惯决定的事情一一**规范化**了，这样可以最大限度地提升程序员间的协作效率。
+
+### 56.1 testdata目录
 
 Go语言规定：**Go工具链将忽略名为testdata的目录**。这样开发者在编写测试时，就可以在名为testdata的目录下**存放和管理测试代码依赖的数据文件**。
+
+```go
+f, err := os.Open(filepath.Join("testdata", "data-001.txt"))
+```
 
 
 
 在$GOROOT/src路径：
 
 ```sh
- find . -name "testdata"
+ $ find . -name "testdata" -print
+ ./cmd/vet/testdata
+./cmd/objdump/testdata
+./cmd/asm/internal/asm/testdata
+...
+./image/testdata
+./image/png/testdata
+./time/testdata
+./mime/testdata
+./mime/multipart/testdata
+./os/testdata
+./text/template/testdata
+./debug/pe/testdata
+./debug/macho/testdata
+./debug/gosym/testdata
+./debug/plan9obj/testdata
+./debug/buildinfo/testdata
+
 ```
 
 
 
-### golden文件惯用法
+经常将预期结果数据保存在文件中并放置在testdata下，然后在测试代码中将被测对象输出的数据与这些预置在文件中的数据进行比较，一致则测试通过；反之，测试失败。
+
+
+
+### 56.2 golden文件惯用法
 
 > 能否把将预期数据采集到文件的过程与测试代码融合到一起呢？
 >
