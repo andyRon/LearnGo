@@ -3101,32 +3101,214 @@ f, err := os.Open(filepath.Join("testdata", "data-001.txt"))
 
 
 
-## 57 正确运用fake、stub和mock等辅助单元测试🔖
+## 57 正确运用fake、stub和mock等辅助单元测试
 
 > 你不需要一个真实的数据库来满足运行单元测试的需求。 
 
-在对Go代码进行测试的过程中，除了会遇到上一条中所提到的测试代码对外部文件数据的依赖之外，还会经常面对被测代码对外部业务组件或服务的依赖。此外，越是接近业务层，被测代码对外部组件或服务依赖的可能性越大。比如：
+在对Go代码进行测试的过程中，除了会遇到上一章中所提到的测试代码对外部文件数据的依赖之外，还会经常面对**被测代码对外部业务组件或服务的依赖**。此外，**越是接近业务层，被测代码对外部组件或服务依赖的可能性越大**。比如：
 
 - 被测代码需要连接外部Redis服务；
 - 被测代码依赖一个外部邮件服务器来发送电子邮件；
 - 被测代码需与外部数据库建立连接并进行数据操作；
 - 被测代码使用了某个外部RESTful服务。
 
+在生产环境中为运行的业务代码提供其依赖的真实组件或服务是必不可少的，也是相对容易的。但是在开发测试环境中，我们无法像在生产环境中那样，为测试（尤其是单元测试）提供真实运行的外部依赖。这是因为测试（尤其是单元测试）运行在各类**开发环境、持续集成或持续交付环境**中，我们很难要求所有环境为运行测试而搭建统一版本、统一访问方式、统一行为控制以及保持返回数据一致的真实外部依赖组件或服务。反过来说，为被测对象建立依赖真实外部组件或服务的测试代码是十分不明智的，因为这种测试（尤指单元测试）运行失败的概率要远大于其运行成功的概率，失去了存在的意义。
 
+为了能让对此类被测代码的测试进行下去，我们需要为这些被测代码提供其依赖的外部组件或服务的**替身**：
 
 ![](images/image-20250310143822732.png)
 
-### fake：真实组件或服务的简化实现版替身
+显然用于代码测试的“替身”不必与真实组件或服务完全相同，替身只需要提供与真实组件或服务相同的接口，只要被测代码认为它是真实的即可。
+
+替身的概念是在[测试驱动编程](https://www.agilealliance.org/glossary/tdd)理论中被提出的。作为测试驱动编程理论的最佳实践，xUnit家族框架将替身的概念在单元测试中应用得淋漓尽致，并总结出多种替身，比如fake、stub、mock等。这些概念及其应用模式被汇集在[《xUnit Test Patterns》](https://book.douban.com/subject/1859393)一书中，该书已成为测试驱动开发和xUnit框架拥趸人手一册的“圣经”。
+
+在本章看一下如何将xUnit最佳实践中的fake、stub和mock等概念应用到Go语言单元测试中以简化测试（区别于直接为被测代码建立其依赖的真实外部组件或服务），以及这些概念是如何促进被测代码重构以提升可测试性的。
+
+不过fake、stub、mock等替身概念之间并非泾渭分明的，理解这些概念并清晰区分它们本身就是一道门槛。本章尽量不涉及这些概念间的交集以避免讲解过于琐碎。想要深入了解这些概念间差别的读者可以自行精读xUnit Test Patterns。
+
+### 57.1 fake：真实组件或服务的简化实现版替身
+
+fake（“伪造的”“假的”“伪装的”）测试就是指采用真实组件或服务的简化版实现作为替身，以满足被测代码的外部依赖需求。
+
+比如：当被测代码需要连接数据库进行相关操作时，虽然我们在开发测试环境中无法提供一个真实的关系数据库来满足测试需求，但是可以基于哈希表实现一个内存版数据库来满足测试代码要求，我们用这样一个伪数据库作为真实数据库的替身，使得测试顺利进行下去。
+
+Go标准库中的`$GOROOT/src/database/sql/fakedb_test.go`就是一个sql.Driver接口的简化版实现，它可以用来打开一个基于内存的数据库（sql.fakeDB）的连接并操作该内存数据库：
+
+```go
+// $GOROOT/src/database/sql/fakedb_test.go￼
+...
+type fakeDriver struct {
+	mu         sync.Mutex // guards 3 following fields
+	openCount  int        // conn opens
+	closeCount int        // conn closes
+	waitCh     chan struct{}
+	waitingCh  chan struct{}
+	dbs        map[string]*fakeDB
+}
+...
+var fdriver driver.Driver = &fakeDriver{}
+
+func init() {
+	Register("test", fdriver)
+}
+```
+
+在sql_test.go中，标准库利用上面的fakeDriver进行相关测试：
+
+```go
+// $GOROOT/src/database/sql/sql_test.go￼
+
+
+const fakeDBName = "foo"
+
+func newTestDB(t testing.TB, name string) *DB {
+	return newTestDBConnector(t, &fakeConnector{name: fakeDBName}, name)
+}
+
+func newTestDBConnector(t testing.TB, fc *fakeConnector, name string) *DB {
+	fc.name = fakeDBName
+	db := OpenDB(fc)
+	if _, err := db.Exec("WIPE"); err != nil {
+		t.Fatalf("exec wipe: %v", err)
+	}
+	if name == "people" {
+		exec(t, db, "CREATE|people|name=string,age=int32,photo=blob,dead=bool,bdate=datetime")
+		exec(t, db, "INSERT|people|name=Alice,age=?,photo=APHOTO", 1)
+		exec(t, db, "INSERT|people|name=Bob,age=?,photo=BPHOTO", 2)
+		exec(t, db, "INSERT|people|name=Chris,age=?,photo=CPHOTO,bdate=?", 3, chrisBirthday)
+	}
+	if name == "magicquery" {
+		// Magic table name and column, known by fakedb_test.go.
+		exec(t, db, "CREATE|magicquery|op=string,millis=int32")
+		exec(t, db, "INSERT|magicquery|op=sleep,millis=10")
+	}
+	if name == "tx_status" {
+		// Magic table name and column, known by fakedb_test.go.
+		exec(t, db, "CREATE|tx_status|tx_status=string")
+		exec(t, db, "INSERT|tx_status|tx_status=invalid")
+	}
+	return db
+}
+
+...
+
+func TestUnsupportedOptions(t *testing.T) {
+	db := newTestDB(t, "people")
+	defer closeDB(t, db)
+	_, err := db.BeginTx(context.Background(), &TxOptions{
+		Isolation: LevelSerializable, ReadOnly: true,
+	})
+	if err == nil {
+		t.Fatal("expected error when using unsupported options, got nil")
+	}
+}
+```
+
+标准库中fakeDriver的这个简化版实现还是比较复杂。
+
+看一个自定义的简单例子来进一步理解fake的概念及其在Go单元测试中的应用。
+
+在这个例子中，被测代码为包mailclient中结构体类型mailClient的方法：ComposeAndSend：
+
+```go
+// faketest1/mailclient.go
+type mailClient struct {
+	mlr mailer.Mailer
+}
+
+func New(mlr mailer.Mailer) *mailClient {
+	return &mailClient{
+		mlr: mlr,
+	}
+}
+
+// 被测方法
+func (c *mailClient) ComposeAndSend(subject string, destinations []string, body string) (string, error) {
+	signTxt := sign.Get()
+	newBody := body + "\n" + signTxt
+
+	for _, dest := range destinations {
+		err := c.mlr.SendMail(subject, dest, newBody)
+		if err != nil {
+			return "", err
+		}
+	}
+	return newBody, nil
+}
+```
+
+可以看到在创建mailClient实例的时候，需要传入一个mailer.Mailer接口变量，该接口定义如下：
+
+```go
+// faketest1/mailer/mailer.go
+type Mailer interface {
+	SendMail(subject, destination, body string) error
+}
+```
+
+ComposeAndSend方法将传入的电子邮件内容（body）与签名（signTxt）编排合并后传给Mailer接口实现者的SendMail方法，由其将邮件发送出去。
+
+在生产环境中，mailer.Mailer接口的实现者是要与远程邮件服务器建立连接并通过特定的电子邮件协议（如SMTP）将邮件内容发送出去的。但在单元测试中，我们无法满足被测代码的这个要求，于是我们为mailClient实例提供了两个**简化版的实现**：fakeOkMailer和fakeFailMailer，前者代表发送成功，后者代表发送失败。代码如下：
+
+```go
+// faketest1/mailclient_test.go￼
+type fakeOkMailer struct{}
+func (m *fakeOkMailer) SendMail(subject string, dest string, body string) error {
+	return nil
+}
+
+type fakeFailMailer struct{}
+func (m *fakeFailMailer) SendMail(subject string, dest string, body string) error {
+	return fmt.Errorf("can not reach the mail server of dest [%s]", dest)
+}
+```
+
+这两个替身在测试中的使用方法：
+
+```go
+// faketest1/mailclient_test.go￼
+func TestComposeAndSendOk(t *testing.T) {
+	m := &fakeOkMailer{}
+	mc := mailclient.New(m)
+	_, err := mc.ComposeAndSend("hello, fake test", []string{"xxx@example.com"}, "the test body")
+	if err != nil {
+		t.Errorf("want nil, got %v", err)
+	}
+}
+
+func TestComposeAndSendFail(t *testing.T) {
+	m := &fakeFailMailer{}
+	mc := mailclient.New(m)
+	_, err := mc.ComposeAndSend("hello, fake test", []string{"xxx@example.com"}, "the test body")
+	if err == nil {
+		t.Errorf("want non-nil, got nil")
+	}
+}
+```
+
+看到这个测试中mailer.Mailer的fake实现的确很简单，**简单到只有一个返回语句**。但就这样一个极其简化的实现却满足了对ComposeAndSend方法进行测试的所有需求。
+使用fake替身进行测试的最常见理由是**在测试环境无法构造被测代码所依赖的外部组件或服务，或者这些组件/服务有副作用**。
+
+fake替身的实现也有两个极端：要么像标准库fakedb_test.go那样实现一个全功能的简化版内存数据库driver，要么像faketest1例子中那样针对被测代码的调用请求仅**返回硬编码的成功或失败**。
+
+这两种极端实现有一个共同点：**并不具备在测试前对返回结果进行预设置的能力**。这也是上面例子中我们针对成功和失败两个用例分别实现了一个替身的原因。（如果非要说成功和失败也是预设置的，那么fake替身的预设置能力也仅限于设置单一的返回值，即无论调用多少次，传入什么参数，返回值都是一个。）
+
+### 57.2 stub：对返回结果有一定预设控制能力的替身🔖
+
+stub也是一种替身概念，和fake替身相比，stub替身**增强了对替身返回结果的间接控制能力**，这种控制可以通过测试前对调用结果**预设置**来实现。不过，stub替身通常仅针对**计划之内的结果**进行设置，对计划之外的请求也无能为力。
 
 
 
-### stub：对返回结果有一定预设控制能力的替身
+### 57.3 mock：专用于行为观察和验证的替身🔖
 
-stub也是一种替身概念，和fake替身相比，stub替身增强了对替身返回结果的间接控制能力，这种控制可以通过测试前对调用结果预设置来实现。不过，stub替身通常仅针对计划之内的结果进行设置，对计划之外的请求也无能为力。
+mock替身比之前两个更为强大：它除了能提供测试前的预设置返回结果能力之外，还可以对mock替身对象在测试过程中的行为进行观察和验证。
+
+不过相比于前两种替身形式，mock存在应用局限（尤指在Go中）。
+
+- 和前两种替身相比，mock的应用范围要窄很多，只用于实现某接口的实现类型的替身。
+- 一般需要通过第三方框架实现mock替身。Go官方维护了一个mock框架——[gomock](https://github.com/golang/mock)，该框架通过代码生成的方式生成实现某接口的替身类型。
 
 
-
-### mock：专用于行为观察和验证的替身
 
 
 
