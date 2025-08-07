@@ -1647,7 +1647,7 @@ ch2 <- 17    // 将整型字面值17发送到带缓冲channel类型变量ch2中
 m := <- ch2  // 从带缓冲channel类型变量ch2中接收一个整型值存储到整型变量m中
 ```
 
-1️⃣由于无缓冲channel的运行时层实现不带有缓冲区，所以Goroutine对无缓冲channel的接收和发送操作是**==同步的==**。也就是说，对同一个无缓冲channel，只有对它进行接收操作的Goroutine和对它进行发送操作的Goroutine都存在的情况下，通信才能得以进行，否则单方面的操作会让对应的Goroutine陷入挂起状态，如：
+1️⃣由于无缓冲channel的运行时层实现不带有缓冲区，所以Goroutine对无缓冲channel的接收和发送操作是**==同步的==**。也就是说，对同一个无缓冲channel，<u>只有对它进行接收操作的Goroutine和对它进行发送操作的Goroutine都存在的情况下</u>，通信才能得以进行，否则单方面的操作会让对应的Goroutine陷入挂起状态，如：
 
 ```go
 func main() {
@@ -1757,7 +1757,7 @@ for v := range ch { // 当ch被关闭后，for range循环结束
 }
 ```
 
-通过“comma, ok”惯用法或for range语句，可以准确地判定channel是否被关闭。而单纯采用n := <-ch形式的语句，就无法判定从ch返回的元素类型零值，究竟是不是因为channel被关闭后才返回的。
+通过“comma, ok”惯用法或for range语句，可以准确地判定channel是否被关闭。而单纯采用`n := <-ch`形式的语句，就无法判定从ch返回的元素类型零值，究竟是不是因为channel被关闭后才返回的。
 
 另外，从前面produce的示例程序中，我们也可以看到，channel是在produce函数中被关闭的，这也是channel的一个使用惯例，那就是发送端负责关闭channel。
 
@@ -1792,8 +1792,6 @@ default:             // 当上面case中的channel通信均无法实施时，执
 当select语句中没有default分支，而且所有case中的channel操作都阻塞了的时候，整个select语句都将被阻塞，直到某一个case上的channel变成**可发送**，或者某个case上的channel变成可接收，select语句才可以继续进行下去。
 
 channel和select两种原语的操作都十分简单，它们都遵循了Go语言“追求简单”的设计哲学，但它们却为Go并发程序带来了强大的表达能力。
-
-
 
 ### 33.2 无缓冲channel的惯用法
 
@@ -2009,7 +2007,7 @@ goroutine-3: current counter value is 4
 
 
 
-### 33.3 带缓冲channel的惯用法 🔖🔖
+### 33.3 带缓冲channel的惯用法
 
 带缓冲的channel与无缓冲的channel的最大不同之处，就在于它的**==异步性==**。也就是说，对一个带缓冲channel，在缓冲区未满的情况下，对它进行发送操作的Goroutine不会阻塞挂起；在缓冲区有数据的情况下，对它进行接收操作的Goroutine也不会阻塞挂起。
 
@@ -2019,13 +2017,13 @@ channel的原生特性与消息队列十分相似，包括Goroutine安全、有F
 
 其实，和无缓冲channel更多用于信号/事件管道相比，可自行设置容量、异步收发的带缓冲channel更适合被用作为消息队列，并且，带缓冲channel在数据收发的性能上要明显好于无缓冲channel。
 
-以通过对channel读写的基本测试来印证这一点 🔖
+以通过对channel读写的基本测试来印证这一点
 
-- **单接收单发送性能的基准测试**
+- **单接收单发送性能的基准测试**。针对一个channel只有一个发送Goroutine和一个接收Goroutine的情况，两种channel的收发性能比对数据：
 
 
 
-- **多接收多发送性能基准测试**
+- **多接收多发送性能基准测试**。针对一个channel有多个发送Goroutine和多个接收Goroutine的情况，两种channel的收发性能比对数据（这里建立10个发送Goroutine和10个接收Goroutine）：
 
 
 
@@ -2037,17 +2035,63 @@ channel的原生特性与消息队列十分相似，包括Goroutine安全、有F
 - 对于带缓冲channel而言，发送与接收的Goroutine数量越多，收发性能会有所下降；
 - 对于带缓冲channel而言，选择适当容量会在一定程度上提升收发性能。
 
-
+> Go支持channel的初衷是将它作为Goroutine间的通信手段，它并不是专门用于消息队列场景的。如果你的项目需要专业消息队列的功能特性，比如**支持优先级、支持权重、支持离线持久化**等，那么channel就不合适了，可以使用第三方的专业的消息队列实现。
 
 #### 第二种用法：用作计数信号量（counting semaphore）
 
 Go并发设计的一个惯用法，就是将带缓冲channel用作计数信号量（counting semaphore）。
 
-带缓冲channel中的当前数据个数代表的是，当前同时处于活动状态（处理业务）的Goroutine的数量，而带缓冲channel的容量（capacity），就代表了允许同时处于活动状态的Goroutine的最大数量。向带缓冲channel的一个发送操作表示获取一个信号量，而从channel的一个接收操作则表示释放一个信号量。
+带缓冲channel中的当前数据个数代表的是，**当前同时处于活动状态（处理业务）的Goroutine的数量**，而带缓冲channel的容量（capacity），就代表了**允许同时处于活动状态的Goroutine的最大数量**。向带缓冲channel的一个发送操作表示**获取一个信号量**，而从channel的一个接收操作则表示**释放一个信号量**。
 
+例子：
 
+```go
+var active = make(chan struct{}, 3)
+var jobs = make(chan int, 10)
 
-#### len(channel)的应用
+func main() {
+	go func() {
+		for i := 0; i < 8; i++ {
+			jobs <- (i + 1)
+		}
+		close(jobs)
+	}()
+
+	var wg sync.WaitGroup
+
+	for j := range jobs {
+		wg.Add(1)
+		go func(j int) {
+			active <- struct{}{}
+			log.Printf("handle job %d\n", j)
+			time.Sleep(2 * time.Second)
+			<-active
+			wg.Done()
+		}(j)
+	}
+	wg.Wait()
+}
+```
+
+这个示例创建了一组Goroutine来处理job，同一时间允许最多3个Goroutine处于活动状态。
+
+为了达成这一目标，这个示例使用了一个容量（capacity）为3的带缓冲channel: **active**作为计数信号量，这意味着允许同时处于**活动状态**的最大Goroutine数量为3。
+
+```go
+$ go run counting_semaphore.go
+2025/08/07 20:39:57 handle job 3
+2025/08/07 20:39:57 handle job 1
+2025/08/07 20:39:57 handle job 8
+2025/08/07 20:39:59 handle job 6
+2025/08/07 20:39:59 handle job 7
+2025/08/07 20:39:59 handle job 4
+2025/08/07 20:40:01 handle job 5
+2025/08/07 20:40:01 handle job 2
+```
+
+从示例运行结果中的时间戳中可以看到，虽然创建了很多Goroutine，但由于计数信号量的存在，同一时间内处于活动状态（正在处理job）的Goroutine的数量最多为3个。
+
+#### len(channel)的应用 🔖
 
 **len**是Go语言的一个内置函数，它支持接收数组、切片、map、字符串和channel类型的参数，并返回对应类型的“长度”，也就是一个整型值。
 

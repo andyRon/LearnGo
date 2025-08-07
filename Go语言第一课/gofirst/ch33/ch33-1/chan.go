@@ -5,11 +5,12 @@ import "fmt"
 func main() {
 	//t1()
 	//t2()
-	//t3()
+	t3()
 	//t4()
-	t_select()
+	//t_select()
 }
 
+// 对无缓冲channel类型的发送与接收操作，一定要==放在两个不同的Goroutine==中进行，否则会导致deadlock
 func t1() {
 	ch1 := make(chan int)
 	ch1 <- 13 // fatal error: all goroutines are asleep - deadlock!
