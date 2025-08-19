@@ -28,8 +28,7 @@ func main() {
 			fmt.Println("accept error:", err)
 			break
 		}
-		// start a new goroutine to handle
-		// the new connection.
+		// 启动一个新的goroutine处理这个新连接￼
 		go handleConn(c)
 	}
 }

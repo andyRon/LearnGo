@@ -4592,9 +4592,9 @@ Target Layer通过各个操作系统提供的系统API来控制被调试目标�
 
 ## 63 理解Go TCP Socket网络编程模型
 
-日常编程中，我们可以看到Go语言中的net包及其子目录下的包（如http）均自带高频和刚需的主角光环。而基于TCP Socket（套接字）的通信则是网络编程的主流，即便你没有直接用过net包中有关TCP Socket的函数/方法或接口，你也总用过net/http包。http包实现的是HTTP这个应用层协议，其在传输层使用的依旧是TCP Socket。
+日常编程中，我们可以看到Go语言中的net包及其子目录下的包（如http）均自带高频和刚需的主角光环。而**基于TCP Socket（套接字）的通信则是网络编程的主流**，即便你没有直接用过net包中有关TCP Socket的函数/方法或接口，你也总用过net/http包。http包实现的是HTTP这个应用层协议，其**在传输层使用的依旧是TCP Socket**。
 
-Go是自带运行时的跨平台编程语言，Go中暴露给语言使用者的TCP Socket接口是建立在操作系统原生TCP Socket接口之上的。由于Go运行时调度的需要，Go设计了一套适合自己的TCP Socket网络编程模型。
+Go是自带运行时的跨平台编程语言，Go中暴露给语言使用者的TCP Socket接口是建立在**操作系统原生TCP Socket接口**之上的。由于Go运行时调度的需要，Go设计了一套适合自己的TCP Socket网络编程模型。
 
 ### 63.1 TCP Socket网络编程模型
 
@@ -4654,21 +4654,100 @@ I/O多路复用模型建立在操作系统提供的select/poll等多路复用函
 
 不过Go语言的设计者认为I/O多路复用的这种**通过回调割裂控制流的模型依旧复杂**，且有悖于一般顺序的逻辑设计，为此他们结合Go语言的自身特点，将该“复杂性”隐藏在了Go运行时中。这样，在大多数情况下，Go开发者无须关心Socket是不是阻塞的，也无须亲自将Socket文件描述符的回调函数注册到类似select这样的系统调用中，而只需在每个连接对应的goroutine中以最简单、最易用的阻塞I/O模型的方式进行Socket操作即可，这种设计大大减轻了网络应用开发人员的心智负担。
 
-🔖
+一个典型的Go网络服务端程序大致如下：
 
-### 63.2 TCP连接的建立🔖
+```go
+func handleConn(c net.Conn) {
+	defer c.Close()
+	for {
+		// read from the connection
+		// ... ...
+		// write to the connection
+		//... ...
+	}
+}
+
+func main() {
+	l, err := net.Listen("tcp", ":8888")
+	if err != nil {
+		fmt.Println("listen error:", err)
+		return
+	}
+
+	for {
+		c, err := l.Accept()
+		if err != nil {
+			fmt.Println("accept error:", err)
+			break
+		}
+		// 启动一个新的goroutine处理这个新连接￼
+		go handleConn(c)
+	}
+}
+```
+
+在Go程序的**用户层**（相对于Go**运行时层**）看来，goroutine采用了“阻塞I/O模型”进行网络I/O操作，Socket都是“阻塞”的。但实际上，这样的假象是Go运行时中的**netpoller（网络轮询器）**通过I/O多路复用机制模拟出来的，对应的底层操作系统Socket实际上是非阻塞的：
+
+```go
+// $GOROOT/src/net/sock_cloexec.go
+func sysSocket(family, sotype, proto int) (int, error) {
+  ...
+  if err = syscall.SetNonblock(s, true); err != nil {
+		poll.CloseFunc(s)
+    return -1, os.NewSyscallError("setnonblock", err)
+  }
+  ...
+}
+```
+
+只是运行时拦截了针对底层Socket的系统调用返回的错误码，并通过netpoller和goroutine调度让goroutine“阻塞”在用户层所看到的Socket描述符上。
+
+比如：当用户层针对某个Socket描述符发起read操作时，如果该Socket对应的连接上尚无数据，那么Go运行时会将该Socket描述符加入netpoller中监听，直到Go运行时收到该Socket数据可读的通知，Go运行时才会重新唤醒等待在该Socket上准备读数据的那个goroutine。而这个过程从goroutine的视角来看，就像是read操作一直阻塞在那个Socket描述符上似的。
+
+Go语言在netpoller中采用了I/O多路复用模型。考虑到最常见的多路复用系统调用select有比较多的限制，比如**监听Socket的数量有上限（1024）、时间复杂度高**等，Go运行时选择了在不同操作系统上使用操作系统各自实现的高性能多路复用函数，比如Linux上的`epoll`、Windows上的`iocp`、FreeBSD/macOS上的`kqueue`、Solaris上的`event port`等，这样可以最大限度地提高netpoller的调度和执行性能。
+
+### 63.2 TCP连接的建立 🔖
+
+众所周知，建立TCP Socket连接需要经历客户端和服务端的三次握手过程。在连接的建立过程中，服务端是一个标准的**Listen+Accept**的结构（可参考上面的代码），而在客户端Go语言使用**Dial或DialTimeout函数**发起连接建立请求。
+
+Dial在调用后将一直阻塞，直到连接建立成功或失败。
+
+```go
+conn, err := net.Dial("tcp", "taobao.com:80")
+if err != nil {
+  // 处理错误
+}
+// 连接建立成功，可以进行读写操作
+```
+
+DialTimeout是带有超时机制的Dial：
+
+```go
+conn, err := net.DialTimeout("tcp", "localhost:8080", 2 * time.Second)
+if err != nil {
+  // 处理错误
+}
+// 连接建立成功，可以进行读写操作
+```
+
+对于客户端而言，建立连接时可能会遇到如下几种情形。
 
 #### 1 网络不可达或对方服务未启动
 
-
+如果传给Dial的服务端地址是网络不可达的，或者服务地址中端口对应的服务并没有启动，端口未被监听（Listen），则Dial几乎会立即返回错误。
 
 
 
 #### 2 对方服务的listen backlog队列满了
 
+还有一种场景是对方服务器很忙，瞬间有大量客户端尝试与服务端建立连接，服务端可能会出现listen backlog队列满了，接收连接（accept）不及时的情况，这将导致客户端的Dial调用阻塞。（通常，即便服务端不调用accept接收客户端连接，在backlog数量范围之内，客户端的连接操作也都是会成功的，因为新的连接已经加入服务端的内核listen队列中了，accept操作只是从这个队列中取出一个连接而已。）
+
 
 
 #### 3 若网络延迟较大，Dial将阻塞并超时
+
+如果网络延迟较大，TCP握手过程将更加艰难坎坷（经历各种丢包），时间消耗自然也会更长，Dial此时会阻塞。如果经过长时间阻塞后依旧无法建立连接，那么Dial也会返回类似“getsockopt: operation timed out”的错误。
+在连接建立阶段，多数情况下Dial是可以满足需求的，即便是阻塞一小会儿。但对于那些有严格的连接时间限定的Go应用，如果一定时间内没能成功建立连接，程序可能需要执行一段异常处理逻辑，为此我们就需要DialTimeout函数了。
 
 
 
