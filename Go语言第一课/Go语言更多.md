@@ -6526,15 +6526,15 @@ ref：[《Go语言设计与实现》7章](https://draven.co/golang/docs/part3-ru
 
 ### 73.1 内存分配器
 
-程序中的数据和变量都会被分配到程序所在的虚拟内存中，内存空间包含两个重要区域：**栈区（Stack）和堆区（Heap）**。函数调用的参数、返回值以及局部变量大都会被分配到栈上，这部分内存会由**编译器**进行管理；不同编程语言使用不同的方法**管理堆区的内存**，C++ 等编程语言会由工程师主动申请和释放内存，Go 以及 Java 等编程语言会由**工程师和编译器共同管理**，堆中的对象由**内存分配器**分配并由垃圾收集器回收。
+程序中的数据和变量都会被分配到程序所在的虚拟内存中，内存空间包含两个重要区域：**栈区（Stack）和堆区（Heap）**。<u>函数调用的参数、返回值以及局部变量</u>大都会被分配到栈上，这部分内存会由**编译器**进行管理；不同编程语言使用不同的方法**管理堆区的内存**，C++等编程语言会由工程师主动申请和释放内存，Go 以及 Java 等编程语言会由**工程师和编译器共同管理**，堆中的对象由**内存分配器**分配并由垃圾收集器回收。
 
-不同的编程语言会选择不同的方式管理内存，本节会介绍 Go 语言内存分配器，详细分析内存分配的过程以及其背后的设计与实现原理。
+不同的编程语言会选择不同的方式管理内存，本节会介绍Go语言内存分配器，详细分析内存分配的过程以及其背后的设计与实现原理。
 
 #### 73.1.1 设计原理
 
-内存管理一般包含三个不同的组件，分别是用户程序（Mutator）、分配器（Allocator）和收集器（Collector)，当用户程序申请内存时，它会通过内存分配器申请新内存，而分配器会负责从堆中初始化相应的内存区域。
+内存管理一般包含三个不同的组件，分别是==用户程序（Mutator）==、==分配器（Allocator）==和==收集器（Collector)==，当用户程序申请内存时，它会通过内存分配器申请新内存，而分配器会负责从堆中初始化相应的内存区域。
 
-Go 语言的内存分配器实现非常复杂。
+Go语言的内存分配器实现非常复杂。
 
 ##### 1️⃣分配方法
 
@@ -6551,7 +6551,7 @@ Go 语言的内存分配器实现非常复杂。
 
 ![](images/image-20250807214234348.png)
 
-虽然线性分配器实现为它带来了较快的执行速度以及较低的实现复杂度，但是线性分配器无法在内存被释放时重用内存。如下图所示，如果已经分配的内存被回收，线性分配器无法重新利用红色的内存：
+虽然线性分配器实现为它带来了较快的执行速度以及较低的实现复杂度，但是线性分配器**无法在内存被释放时重用内存**。如下图所示，如果已经分配的内存被回收，线性分配器无法重新利用红色的内存：
 
 ![](images/image-20250807214323841.png)
 
@@ -6565,14 +6565,14 @@ Go 语言的内存分配器实现非常复杂。
 
 ![free-list-allocator](images/2020-02-29-15829868066446-free-list-allocator.png)
 
-因为不同的内存块通过指针构成了链表，所以使用这种方式的分配器可以重新利用回收的资源，但是因为分配内存时需要遍历链表，所以它的时间复杂度是 𝑂(𝑛)O(n)。空闲链表分配器可以选择不同的策略在链表中的内存块中进行选择，最常见的是以下四种：
+因为不同的内存块通过指针构成了链表，所以使用这种方式的分配器可以重新利用回收的资源，但是因为分配内存时需要遍历链表，所以它的时间复杂度是 𝑂(𝑛)。空闲链表分配器可以选择**不同的策略在链表中的内存块中进行选择**，最常见的是以下四种：
 
 - 首次适应（First-Fit）— 从链表头开始遍历，选择第一个大小大于申请内存的内存块；
 - 循环首次适应（Next-Fit）— 从上次遍历的结束位置开始遍历，选择第一个大小大于申请内存的内存块；
 - 最优适应（Best-Fit）— 从链表头遍历整个链表，选择最合适的内存块；
-- 隔离适应（Segregated-Fit）— 将内存分割成多个链表，每个链表中的内存块大小相同，申请内存时先找到满足条件的链表，再从链表中选择合适的内存块；
+- ==隔离适应（Segregated-Fit）==— 将内存分割成多个链表，每个链表中的内存块大小相同，申请内存时先找到满足条件的链表，再从链表中选择合适的内存块；
 
-Go 语言使用的内存分配策略与第四种策略有些相似：
+Go语言使用的内存分配策略与第四种策略有些相似：
 
 ![](images/image-20250807214654652.png)
 
@@ -6580,11 +6580,11 @@ Go 语言使用的内存分配策略与第四种策略有些相似：
 
 ##### 2️⃣分级分配
 
-线程缓存分配（Thread-Caching Malloc，TCMalloc）是用于分配内存的机制，它比 `glibc` 中的 `malloc` 还要快很多。Go 语言的内存分配器就借鉴了 `TCMalloc` 的设计实现高速的内存分配，它的核心理念是**使用多级缓存将对象根据大小分类，并按照类别实施不同的分配策略**。
+线程缓存分配（Thread-Caching Malloc，TCMalloc）是用于分配内存的机制，它比`glibc`中的`malloc`还要快很多。Go语言的内存分配器就借鉴了 `TCMalloc`的设计实现高速的内存分配，它的核心理念是**使用多级缓存将对象根据大小分类，并按照类别实施不同的分配策略**。
 
 ###### 对象大小
 
-Go 语言的内存分配器会根据申请分配的内存大小选择不同的处理逻辑，运行时根据对象的大小将对象分成微对象、小对象和大对象三种：
+Go语言的内存分配器会根据申请分配的内存大小选择不同的处理逻辑，运行时根据对象的大小将对象分成微对象、小对象和大对象三种：
 
 |  类别  |     大小      |
 | :----: | :-----------: |
@@ -6592,17 +6592,17 @@ Go 语言的内存分配器会根据申请分配的内存大小选择不同的�
 | 小对象 | `[16B, 32KB]` |
 | 大对象 | `(32KB, +∞)`  |
 
-因为程序中的绝大多数对象的大小都在 32KB 以下，而申请的内存大小影响 Go 语言运行时分配内存的过程和开销，所以分别处理大对象和小对象有利于提高内存分配器的性能。
+因为程序中的绝大多数对象的大小都在32KB以下，而申请的内存大小影响Go语言运行时分配内存的过程和开销，所以分别处理大对象和小对象有利于提高内存分配器的性能。
 
 ###### 多级缓存
 
-内存分配器不仅会区别对待大小不同的对象，还会将内存分成不同的级别分别管理，TCMalloc 和 Go 运行时分配器都会引入**线程缓存（Thread Cache）、中心缓存（Central Cache）和页堆（Page Heap）**三个组件分级管理内存：
+内存分配器不仅会区别对待大小不同的对象，还会将内存分成不同的级别分别管理，TCMalloc和Go运行时分配器都会引入**线程缓存（Thread Cache）、中心缓存（Central Cache）和页堆（Page Heap）**三个组件分级管理内存：
 
 ![](images/image-20250807215051784.png)
 
-线程缓存属于每一个独立的线程，它能够满足线程上绝大多数的内存分配需求，因为不涉及多线程，所以也不需要使用互斥锁来保护内存，这能够减少锁竞争带来的性能损耗。当线程缓存不能满足需求时，运行时会使用中心缓存作为补充解决小对象的内存分配，在遇到 32KB 以上的对象时，内存分配器会选择页堆直接分配大内存。
+**线程缓存属于每一个独立的线程，它能够满足线程上绝大多数的内存分配需求，因为不涉及多线程，所以也不需要使用互斥锁来保护内存，这能够减少锁竞争带来的性能损耗。当线程缓存不能满足需求时，运行时会使用中心缓存作为补充解决小对象的内存分配，在遇到 32KB 以上的对象时，内存分配器会选择页堆直接分配大内存。**
 
-这种多层级的内存分配设计与计算机操作系统中的多级缓存有些类似，因为多数的对象都是小对象，我们可以通过线程缓存和中心缓存提供足够的内存空间，发现资源不足时从上一级组件中获取更多的内存资源。
+这种多层级的内存分配设计与计算机操作系统中的**多级缓存**有些类似，因为多数的对象都是小对象，我们可以通过线程缓存和中心缓存提供足够的内存空间，发现资源不足时从上一级组件中获取更多的内存资源。
 
 ##### 3️⃣虚拟内存布局
 
@@ -6666,7 +6666,7 @@ Go 语言团队在 1.11 版本中通过以下几个提交将线性内存变成�
 
 ##### 4️⃣地址空间
 
-因为所有的内存最终都是要从操作系统中申请的，所以 Go 语言的运行时构建了操作系统的内存管理抽象层，该抽象层将运行时管理的地址空间分成以下四种状态：
+因为所有的内存最终都是要从操作系统中申请的，所以Go语言的运行时构建了**操作系统的内存管理抽象层**，该抽象层将运行时管理的地址空间分成以下四种状态：
 
 |    状态    |                             解释                             |
 | :--------: | :----------------------------------------------------------: |
@@ -6679,7 +6679,7 @@ Go 语言团队在 1.11 版本中通过以下几个提交将线性内存变成�
 
 ![](images/image-20250807220011975.png)
 
-运行时中包含多个操作系统实现的状态转换方法，所有的实现都包含在以 `mem_` 开头的文件中，本节将介绍 Linux 操作系统对上图中方法的实现：
+运行时中包含多个操作系统实现的状态转换方法，所有的实现都包含在以 `mem_` 开头的文件中，本节将介绍 Linux 操作系统对上图中方法的实现：🔖
 
 - [`runtime.sysAlloc`](https://draven.co/golang/tree/runtime.sysAlloc) 会从操作系统中获取一大块可用的内存空间，可能为几百 KB 或者几 MB；
 - [`runtime.sysFree`](https://draven.co/golang/tree/runtime.sysFree) 会在程序发生内存不足（Out-of Memory，OOM）时调用并无条件地返回内存；
@@ -6693,27 +6693,529 @@ Go 语言团队在 1.11 版本中通过以下几个提交将线性内存变成�
 
 #### 73.1.2 内存管理组件
 
-内存管理单元、线程缓存、中心缓存和页堆
+Go 语言的内存分配器包含：**内存管理单元、线程缓存、中心缓存和页堆**，分别对应的数据结构：`runtime.mspan`、`runtime.mcache`、`runtime.mcentral` 和 `runtime.mheap`。
 
-`runtime.mspan`、`runtime.mcache`、`runtime.mcentral` 和 `runtime.mheap`
+![图 7-10 Go 程序的内存布局](images/image-20250807220146592.png)
 
-![](images/image-20250807220146592.png)
+所有的 Go 语言程序都会在启动时初始化如上图所示的内存布局，每一个处理器都会分配一个线程缓存 [`runtime.mcache`](https://draven.co/golang/tree/runtime.mcache) 用于处理微对象和小对象的分配，它们会持有内存管理单元 [`runtime.mspan`](https://draven.co/golang/tree/runtime.mspan)。
 
-##### 内存管理单元
+每个类型的内存管理单元都会管理特定大小的对象，当内存管理单元中不存在空闲对象时，它们会从 [`runtime.mheap`](https://draven.co/golang/tree/runtime.mheap) 持有的 134 个中心缓存 [`runtime.mcentral`](https://draven.co/golang/tree/runtime.mcentral) 中获取新的内存单元，中心缓存属于全局的堆结构体 [`runtime.mheap`](https://draven.co/golang/tree/runtime.mheap)，它会从操作系统中申请内存。
 
-![](images/image-20250807220537860.png)
+在 amd64 的 Linux 操作系统上，[`runtime.mheap`](https://draven.co/golang/tree/runtime.mheap) 会持有 4,194,304 [`runtime.heapArena`](https://draven.co/golang/tree/runtime.heapArena)，每个 [`runtime.heapArena`](https://draven.co/golang/tree/runtime.heapArena) 都会管理 64MB 的内存，单个 Go 语言程序的内存上限也就是 256TB。
 
-##### 线程缓存
+##### 73.1.2.1 内存管理单元
+
+[`runtime.mspan`](https://draven.co/golang/tree/runtime.mspan) 是 Go 语言内存管理的基本单元，该结构体中包含 `next` 和 `prev` 两个字段，它们分别指向了前一个和后一个 [`runtime.mspan`](https://draven.co/golang/tree/runtime.mspan)：
+
+```go
+type mspan struct {
+	next *mspan
+	prev *mspan
+	...
+}
+```
+
+串联后的上述结构体会构成如下双向链表，运行时会使用 [`runtime.mSpanList`](https://draven.co/golang/tree/runtime.mSpanList) 存储双向链表的头结点和尾节点并在线程缓存以及中心缓存中使用。
+
+![内存管理单元与双向链表](images/image-20250807220537860.png)
+
+###### 页和内存
+
+每个 [`runtime.mspan`](https://draven.co/golang/tree/runtime.mspan) 都管理 `npages` 个大小为 8KB 的页，这里的页不是操作系统中的内存页，它们是操作系统内存页的整数倍，该结构体会使用下面这些字段来管理内存页的分配和回收：
+
+```go
+type mspan struct {
+	startAddr uintptr // 起始地址
+	npages    uintptr // 页数
+	freeindex uintptr
+
+	allocBits  *gcBits
+	gcmarkBits *gcBits
+	allocCache uint64
+	...
+}
+```
+
+- `startAddr` 和 `npages` —— 确定该结构体管理的多个页所在的内存，每个页的大小都是 8KB；
+- `freeindex` —— 扫描页中空闲对象的初始索引；
+- `allocBits` 和 `gcmarkBits` —— 分别用于标记内存的占用和回收情况；
+- `allocCache` —— `allocBits` 的补码，可以用于快速查找内存中未被使用的内存；
+
+[`runtime.mspan`](https://draven.co/golang/tree/runtime.mspan) 会以两种不同的视角看待管理的内存，当结构体管理的内存不足时，运行时会以页为单位向堆申请内存：
+
+![内存管理单元与页](images/image-20250819190902914.png)
+
+当用户程序或者线程向 [`runtime.mspan`](https://draven.co/golang/tree/runtime.mspan) 申请内存时，它会使用 `allocCache` 字段以对象为单位在管理的内存中快速查找待分配的空间：
+
+![图 7-13 内存管理单元与对象](images/image-20250819190951112.png)
+
+如果我们能在内存中找到空闲的内存单元会直接返回，当内存中不包含空闲的内存时，上一级的组件 [`runtime.mcache`](https://draven.co/golang/tree/runtime.mcache) 会为调用 [`runtime.mcache.refill`](https://draven.co/golang/tree/runtime.mcache.refill) 更新内存管理单元以满足为更多对象分配内存的需求。
+
+###### 状态 
+
+运行时会使用 [`runtime.mSpanStateBox`](https://draven.co/golang/tree/runtime.mSpanStateBox) 存储内存管理单元的状态 [`runtime.mSpanState`](https://draven.co/golang/tree/runtime.mSpanState)：
+
+```go
+type mspan struct {
+	...
+	state       mSpanStateBox
+	...
+}
+```
+
+该状态可能处于 `mSpanDead`、`mSpanInUse`、`mSpanManual` 和 `mSpanFree` 四种情况。当 [`runtime.mspan`](https://draven.co/golang/tree/runtime.mspan) 在空闲堆中，它会处于 `mSpanFree` 状态；当 [`runtime.mspan`](https://draven.co/golang/tree/runtime.mspan) 已经被分配时，它会处于 `mSpanInUse`、`mSpanManual` 状态，运行时会遵循下面的规则转换该状态：
+
+- 在垃圾回收的任意阶段，可能从 `mSpanFree` 转换到 `mSpanInUse` 和 `mSpanManual`；
+- 在垃圾回收的清除阶段，可能从 `mSpanInUse` 和 `mSpanManual` 转换到 `mSpanFree`；
+- 在垃圾回收的标记阶段，不能从 `mSpanInUse` 和 `mSpanManual` 转换到 `mSpanFree`；
+
+设置 [`runtime.mspan`](https://draven.co/golang/tree/runtime.mspan) 状态的操作必须是原子性的以避免垃圾回收造成的线程竞争问题。
+
+###### 跨度类
+
+[`runtime.spanClass`](https://draven.co/golang/tree/runtime.spanClass) 是 [`runtime.mspan`](https://draven.co/golang/tree/runtime.mspan) 的跨度类，它决定了内存管理单元中存储的对象大小和个数：
+
+```go
+type mspan struct {
+	...
+	spanclass   spanClass
+	...
+}
+```
+
+Go 语言的内存管理模块中一共包含 67 种跨度类，每一个跨度类都会存储特定大小的对象并且包含特定数量的页数以及对象，所有的数据都会被预选计算好并存储在 [`runtime.class_to_size`](https://draven.co/golang/tree/runtime.class_to_size) 和 [`runtime.class_to_allocnpages`](https://draven.co/golang/tree/runtime.class_to_allocnpages) 等变量中：
+
+**表 7-3 跨度类的数据**
+
+| class | bytes/obj | bytes/span | objects | tail waste | max waste |
+| :---: | --------: | ---------: | ------: | :--------: | :-------: |
+|   1   |         8 |       8192 |    1024 |     0      |  87.50%   |
+|   2   |        16 |       8192 |     512 |     0      |  43.75%   |
+|   3   |        24 |       8192 |     341 |     0      |  29.24%   |
+|   4   |        32 |       8192 |     256 |     0      |  46.88%   |
+|   5   |        48 |       8192 |     170 |     32     |  31.52%   |
+|   6   |        64 |       8192 |     128 |     0      |  23.44%   |
+|   7   |        80 |       8192 |     102 |     32     |  19.07%   |
+|   …   |         … |          … |       … |     …      |     …     |
+|  67   |     32768 |      32768 |       1 |     0      |  12.50%   |
+
+上表展示了对象大小从 8B 到 32KB，总共 67 种跨度类的大小、存储的对象数以及浪费的内存空间，以表中的第四个跨度类为例，跨度类为 5 的 [`runtime.mspan`](https://draven.co/golang/tree/runtime.mspan) 中对象的大小上限为 48 字节、管理 1 个页、最多可以存储 170 个对象。因为内存需要按照页进行管理，所以在尾部会浪费 32 字节的内存，当页中存储的对象都是 33 字节时，最多会浪费 31.52% 的资源：
+
+$$\frac{(48 - 33) * 170 + 32}{8192} = 0.31518$$
+
+![图 7-14 跨度类浪费的内存](images/image-20250819191338008.png)
+
+除了上述 67 个跨度类之外，运行时中还包含 ID 为 0 的特殊跨度类，它能够管理大于 32KB 的特殊对象，我们会在后面详细介绍大对象的分配过程，在这里就不展开说明了。
+
+跨度类中除了存储类别的 ID 之外，它还会存储一个 `noscan` 标记位，该标记位表示对象是否包含指针，垃圾回收会对包含指针的 [`runtime.mspan`](https://draven.co/golang/tree/runtime.mspan) 结构体进行扫描。我们可以通过下面的几个函数和方法了解 ID 和标记位的底层存储方式：
+
+```go
+func makeSpanClass(sizeclass uint8, noscan bool) spanClass {
+	return spanClass(sizeclass<<1) | spanClass(bool2int(noscan))
+}
+
+func (sc spanClass) sizeclass() int8 {
+	return int8(sc >> 1)
+}
+
+func (sc spanClass) noscan() bool {
+	return sc&1 != 0
+}
+```
+
+[`runtime.spanClass`](https://draven.co/golang/tree/runtime.spanClass) 是一个 `uint8` 类型的整数，它的前 7 位存储着跨度类的 ID，最后一位表示是否包含指针，该类型提供的两个方法能够帮我们快速获取对应的字段。
+
+##### 73.1.2.2 线程缓存
+
+[`runtime.mcache`](https://draven.co/golang/tree/runtime.mcache) 是 Go 语言中的线程缓存，它会与线程上的处理器一一绑定，主要用来缓存用户程序申请的微小对象。每一个线程缓存都持有 68 * 2 个 [`runtime.mspan`](https://draven.co/golang/tree/runtime.mspan)，这些内存管理单元都存储在结构体的 `alloc` 字段中：
+
+![图 7-15 线程缓存与内存管理单元](images/image-20250819191535765.png)
+
+线程缓存在刚刚被初始化时是不包含 [`runtime.mspan`](https://draven.co/golang/tree/runtime.mspan) 的，只有当用户程序申请内存时才会从上一级组件获取新的 [`runtime.mspan`](https://draven.co/golang/tree/runtime.mspan) 满足内存分配的需求。
+
+###### 初始化 
+
+运行时在初始化处理器时会调用 [`runtime.allocmcache`](https://draven.co/golang/tree/runtime.allocmcache) 初始化线程缓存，该函数会在系统栈中使用 [`runtime.mheap`](https://draven.co/golang/tree/runtime.mheap) 中的线程缓存分配器初始化新的 [`runtime.mcache`](https://draven.co/golang/tree/runtime.mcache) 结构体：
+
+```go
+func allocmcache() *mcache {
+	var c *mcache
+	systemstack(func() {
+		lock(&mheap_.lock)
+		c = (*mcache)(mheap_.cachealloc.alloc())
+		c.flushGen = mheap_.sweepgen
+		unlock(&mheap_.lock)
+	})
+	for i := range c.alloc {
+		c.alloc[i] = &emptymspan
+	}
+	c.nextSample = nextSample()
+	return c
+}
+```
+
+就像我们在上面提到的，初始化后的 [`runtime.mcache`](https://draven.co/golang/tree/runtime.mcache) 中的所有 [`runtime.mspan`](https://draven.co/golang/tree/runtime.mspan) 都是空的占位符 `emptymspan`。
+
+###### 替换
+
+[`runtime.mcache.refill`](https://draven.co/golang/tree/runtime.mcache.refill) 会为线程缓存获取一个指定跨度类的内存管理单元，被替换的单元不能包含空闲的内存空间，而获取的单元中需要至少包含一个空闲对象用于分配内存：
+
+```go
+func (c *mcache) refill(spc spanClass) {
+	s := c.alloc[spc]
+	s = mheap_.central[spc].mcentral.cacheSpan()
+	c.alloc[spc] = s
+}
+```
+
+如上述代码所示，该方法会从中心缓存中申请新的 [`runtime.mspan`](https://draven.co/golang/tree/runtime.mspan) 存储到线程缓存中，这也是向线程缓存插入内存管理单元的唯一方法。
+
+###### 微分配器
+
+线程缓存中还包含几个用于分配微对象的字段，下面的这三个字段组成了微对象分配器，专门管理 16 字节以下的对象：
+
+```go
+type mcache struct {
+	tiny             uintptr
+	tinyoffset       uintptr
+	local_tinyallocs uintptr
+}
+```
+
+微分配器只会用于分配非指针类型的内存，上述三个字段中 `tiny` 会指向堆中的一片内存，`tinyOffset` 是下一个空闲内存所在的偏移量，最后的 `local_tinyallocs` 会记录内存分配器中分配的对象个数。
 
 
 
-##### 中心缓存
+##### 73.1.2.3 中心缓存
 
+[`runtime.mcentral`](https://draven.co/golang/tree/runtime.mcentral) 是内存分配器的中心缓存，与线程缓存不同，访问中心缓存中的内存管理单元需要使用互斥锁：
 
+```go
+type mcentral struct {
+	spanclass spanClass
+	partial  [2]spanSet
+	full     [2]spanSet
+}
+```
 
-##### 页堆
+每个中心缓存都会管理某个跨度类的内存管理单元，它会同时持有两个 [`runtime.spanSet`](https://draven.co/golang/tree/runtime.spanSet)，分别存储包含空闲对象和不包含空闲对象的内存管理单元。
 
+###### 内存管理单元 
 
+线程缓存会通过中心缓存的 [`runtime.mcentral.cacheSpan`](https://draven.co/golang/tree/runtime.mcentral.cacheSpan) 方法获取新的内存管理单元，该方法的实现比较复杂，我们可以将其分成以下几个部分：
+
+1. 调用 [`runtime.mcentral.partialSwept`](https://draven.co/golang/tree/runtime.mcentral.partialSwept) 从清理过的、包含空闲空间的 [`runtime.spanSet`](https://draven.co/golang/tree/runtime.spanSet) 结构中查找可以使用的内存管理单元；
+2. 调用 [`runtime.mcentral.partialUnswept`](https://draven.co/golang/tree/runtime.mcentral.partialUnswept) 从未被清理过的、有空闲对象的 [`runtime.spanSet`](https://draven.co/golang/tree/runtime.spanSet) 结构中查找可以使用的内存管理单元；
+3. 调用 [`runtime.mcentral.fullUnswept`](https://draven.co/golang/tree/runtime.mcentral.fullUnswept) 获取未被清理的、不包含空闲空间的 [`runtime.spanSet`](https://draven.co/golang/tree/runtime.spanSet) 中获取内存管理单元并通过 [`runtime.mspan.sweep`](https://draven.co/golang/tree/runtime.mspan.sweep) 清理它的内存空间；
+4. 调用 [`runtime.mcentral.grow`](https://draven.co/golang/tree/runtime.mcentral.grow) 从堆中申请新的内存管理单元；
+5. 更新内存管理单元的 `allocCache` 等字段帮助快速分配内存；
+
+首先我们会在中心缓存的空闲集合中查找可用的 [`runtime.mspan`](https://draven.co/golang/tree/runtime.mspan)，运行时总是会先从获取清理过的内存管理单元，后检查未清理的内存管理单元：
+
+```go
+func (c *mcentral) cacheSpan() *mspan {
+	sg := mheap_.sweepgen
+	spanBudget := 100
+
+	var s *mspan
+	if s = c.partialSwept(sg).pop(); s != nil {
+		goto havespan
+	}
+
+	for ; spanBudget >= 0; spanBudget-- {
+		s = c.partialUnswept(sg).pop()
+		if s == nil {
+			break
+		}
+		if atomic.Load(&s.sweepgen) == sg-2 && atomic.Cas(&s.sweepgen, sg-2, sg-1) {
+、			s.sweep(true)
+			goto havespan
+		}
+	}
+	...
+}
+```
+
+当找到需要回收的内存单元时，运行时会触发 [`runtime.mspan.sweep`](https://draven.co/golang/tree/runtime.mspan.sweep) 进行清理，如果在包含空闲空间的集合中没有找到管理单元，那么运行时尝试会从未清理的集合中获取：
+
+```go
+func (c *mcentral) cacheSpan() *mspan {
+	...
+	for ; spanBudget >= 0; spanBudget-- {
+		s = c.fullUnswept(sg).pop()
+		if s == nil {
+			break
+		}
+		if atomic.Load(&s.sweepgen) == sg-2 && atomic.Cas(&s.sweepgen, sg-2, sg-1) {
+、			s.sweep(true)
+、			freeIndex := s.nextFreeIndex()
+			if freeIndex != s.nelems {
+				s.freeindex = freeIndex
+				goto havespan
+			}
+、			c.fullSwept(sg).push(s)
+		}
+、	}
+	...
+}
+```
+
+如果 [`runtime.mcentral`](https://draven.co/golang/tree/runtime.mcentral) 通过上述两个阶段都没有找到可用的单元，它会调用 [`runtime.mcentral.grow`](https://draven.co/golang/tree/runtime.mcentral.grow) 触发扩容从堆中申请新的内存：
+
+```go
+func (c *mcentral) cacheSpan() *mspan {
+	...
+	s = c.grow()
+	if s == nil {
+		return nil
+	}
+
+havespan:
+	freeByteBase := s.freeindex &^ (64 - 1)
+	whichByte := freeByteBase / 8
+	s.refillAllocCache(whichByte)
+
+	s.allocCache >>= s.freeindex % 64
+
+	return s
+}
+```
+
+无论通过哪种方法获取到了内存单元，该方法的最后都会更新内存单元的 `allocBits` 和 `allocCache` 等字段，让运行时在分配内存时能够快速找到空闲的对象。
+
+###### 扩容
+
+中心缓存的扩容方法 [`runtime.mcentral.grow`](https://draven.co/golang/tree/runtime.mcentral.grow) 会根据预先计算的 `class_to_allocnpages` 和 `class_to_size` 获取待分配的页数以及跨度类并调用 [`runtime.mheap.alloc`](https://draven.co/golang/tree/runtime.mheap.alloc) 获取新的 [`runtime.mspan`](https://draven.co/golang/tree/runtime.mspan) 结构：
+
+```go
+func (c *mcentral) grow() *mspan {
+	npages := uintptr(class_to_allocnpages[c.spanclass.sizeclass()])
+	size := uintptr(class_to_size[c.spanclass.sizeclass()])
+
+	s := mheap_.alloc(npages, c.spanclass, true)
+	if s == nil {
+		return nil
+	}
+
+	n := (npages << _PageShift) >> s.divShift * uintptr(s.divMul) >> s.divShift2
+	s.limit = s.base() + size*n
+	heapBitsForAddr(s.base()).initSpan(s)
+	return s
+}
+```
+
+获取了 [`runtime.mspan`](https://draven.co/golang/tree/runtime.mspan) 后，我们会在上述方法中初始化 `limit` 字段并清除该结构在堆上对应的位图。
+
+##### 73.1.2.4 页堆
+
+[`runtime.mheap`](https://draven.co/golang/tree/runtime.mheap) 是内存分配的核心结构体，Go 语言程序会将其作为全局变量存储，而堆上初始化的所有对象都由该结构体统一管理，该结构体中包含两组非常重要的字段，其中一个是全局的中心缓存列表 `central`，另一个是管理堆区内存区域的 `arenas` 以及相关字段。
+
+页堆中包含一个长度为 136 的 [`runtime.mcentral`](https://draven.co/golang/tree/runtime.mcentral) 数组，其中 68 个为跨度类需要 `scan` 的中心缓存，另外的 68 个是 `noscan` 的中心缓存：
+
+![图 7-17 页堆与中心缓存列表](images/image-20250819192011437.png)
+
+在设计原理一节中已经介绍过 Go 语言所有的内存空间都由如下所示的二维矩阵 [`runtime.heapArena`](https://draven.co/golang/tree/runtime.heapArena) 管理，这个二维矩阵管理的内存可以是不连续的：
+
+![页堆管理的内存区域](images/image-20250819192245918.png)
+
+在除了 Windows 以外的 64 位操作系统中，每一个 [`runtime.heapArena`](https://draven.co/golang/tree/runtime.heapArena) 都会管理 64MB 的内存空间，如下所示的表格展示了不同平台上 Go 语言程序管理的堆区大小以及 [`runtime.heapArena`](https://draven.co/golang/tree/runtime.heapArena) 占用的内存空间：
+
+|           平台 | 地址位数 | Arena 大小 | 一维大小 |   二维大小 |
+| -------------: | -------: | ---------: | -------: | ---------: |
+|       */64-bit |       48 |       64MB |        1 |  4M (32MB) |
+| windows/64-bit |       48 |        4MB |       64 |   1M (8MB) |
+|       */32-bit |       32 |        4MB |        1 | 1024 (4KB) |
+|     */mips(le) |       31 |        4MB |        1 |  512 (2KB) |
+
+**表 7-3 平台与页堆大小的关系**
+
+本节将介绍页堆的初始化、内存分配以及内存管理单元分配的过程，这些过程能够帮助我们理解全局变量页堆与其他组件的关系以及它管理内存的方式。
+
+###### 初始化
+
+堆区的初始化会使用 [`runtime.mheap.init`](https://draven.co/golang/tree/runtime.mheap.init) 方法，我们能看到该方法初始化了非常多的结构体和字段，不过其中初始化的两类变量比较重要：
+
+1. `spanalloc`、`cachealloc` 以及 `arenaHintAlloc` 等 [`runtime.fixalloc`](https://draven.co/golang/tree/runtime.fixalloc) 类型的空闲链表分配器；
+2. `central` 切片中 [`runtime.mcentral`](https://draven.co/golang/tree/runtime.mcentral) 类型的中心缓存；
+
+```go
+func (h *mheap) init() {
+	h.spanalloc.init(unsafe.Sizeof(mspan{}), recordspan, unsafe.Pointer(h), &memstats.mspan_sys)
+	h.cachealloc.init(unsafe.Sizeof(mcache{}), nil, nil, &memstats.mcache_sys)
+	h.specialfinalizeralloc.init(unsafe.Sizeof(specialfinalizer{}), nil, nil, &memstats.other_sys)
+	h.specialprofilealloc.init(unsafe.Sizeof(specialprofile{}), nil, nil, &memstats.other_sys)
+	h.arenaHintAlloc.init(unsafe.Sizeof(arenaHint{}), nil, nil, &memstats.other_sys)
+
+	h.spanalloc.zero = false
+
+	for i := range h.central {
+		h.central[i].mcentral.init(spanClass(i))
+	}
+
+	h.pages.init(&h.lock, &memstats.gc_sys)
+}
+```
+
+堆中初始化的多个空闲链表分配器与设计原理中提到的分配器没有太多区别，当我们调用 [`runtime.fixalloc.init`](https://draven.co/golang/tree/runtime.fixalloc.init) 初始化分配器时，需要传入待初始化的结构体大小等信息，这会帮助分配器分割待分配的内存，它提供了以下两个用于分配和释放内存的方法：
+
+1. [`runtime.fixalloc.alloc`](https://draven.co/golang/tree/runtime.fixalloc.alloc) — 获取下一个空闲的内存空间；
+2. [`runtime.fixalloc.free`](https://draven.co/golang/tree/runtime.fixalloc.free) — 释放指针指向的内存空间；
+
+除了这些空闲链表分配器之外，我们还会在该方法中初始化所有的中心缓存，这些中心缓存会维护全局的内存管理单元，各个线程会通过中心缓存获取新的内存单元。
+
+###### 内存管理单元
+
+[`runtime.mheap`](https://draven.co/golang/tree/runtime.mheap) 是内存分配器中的核心组件，运行时会通过它的 [`runtime.mheap.alloc`](https://draven.co/golang/tree/runtime.mheap.alloc) 方法在系统栈中获取新的 [`runtime.mspan`](https://draven.co/golang/tree/runtime.mspan) 单元：
+
+```go
+func (h *mheap) alloc(npages uintptr, spanclass spanClass, needzero bool) *mspan {
+	var s *mspan
+	systemstack(func() {
+		if h.sweepdone == 0 {
+			h.reclaim(npages)
+		}
+		s = h.allocSpan(npages, false, spanclass, &memstats.heap_inuse)
+	})
+	...
+	return s
+}
+```
+
+为了阻止内存的大量占用和堆的增长，我们在分配对应页数的内存前需要先调用 [`runtime.mheap.reclaim`](https://draven.co/golang/tree/runtime.mheap.reclaim) 方法回收一部分内存，随后运行时通过 [`runtime.mheap.allocSpan`](https://draven.co/golang/tree/runtime.mheap.allocSpan) 分配新的内存管理单元，我们会将该方法的执行过程拆分成两个部分：
+
+1. 从堆上分配新的内存页和内存管理单元 [`runtime.mspan`](https://draven.co/golang/tree/runtime.mspan)；
+2. 初始化内存管理单元并将其加入 [`runtime.mheap`](https://draven.co/golang/tree/runtime.mheap) 持有内存单元列表；
+
+首先我们需要在堆上申请 `npages` 数量的内存页并初始化 [`runtime.mspan`](https://draven.co/golang/tree/runtime.mspan)：
+
+```go
+func (h *mheap) allocSpan(npages uintptr, typ spanAllocType, spanclass spanClass) (s *mspan) {
+	gp := getg()
+	base, scav := uintptr(0), uintptr(0)
+	pp := gp.m.p.ptr()
+	if pp != nil && npages < pageCachePages/4 {
+		c := &pp.pcache
+		base, scav = c.alloc(npages)
+		if base != 0 {
+			s = h.tryAllocMSpan()
+			if s != nil && gcBlackenEnabled == 0 && (manual || spanclass.sizeclass() != 0) {
+				goto HaveSpan
+			}
+		}
+	}
+
+	if base == 0 {
+		base, scav = h.pages.alloc(npages)
+		if base == 0 {
+			h.grow(npages)
+            base, scav = h.pages.alloc(npages)
+			if base == 0 {
+				throw("grew heap, but no adequate free space found")
+			}
+		}
+	}
+	if s == nil {
+		s = h.allocMSpanLocked()
+	}
+	...
+}
+```
+
+上述方法会通过处理器的页缓存 [`runtime.pageCache`](https://draven.co/golang/tree/runtime.pageCache) 或者全局的页分配器 [`runtime.pageAlloc`](https://draven.co/golang/tree/runtime.pageAlloc) 两种途径从堆中申请内存：
+
+1. 如果申请的内存比较小，获取申请内存的处理器并尝试调用 [`runtime.pageCache.alloc`](https://draven.co/golang/tree/runtime.pageCache.alloc) 获取内存区域的基地址和大小；
+2. 如果申请的内存比较大或者线程的页缓存中内存不足，会通过 [`runtime.pageAlloc.alloc`](https://draven.co/golang/tree/runtime.pageAlloc.alloc) 在页堆上申请内存；
+3. 如果发现页堆上的内存不足，会尝试通过`runtime.mheap.grow`扩容并重新调用`runtime.pageAlloc.alloc`申请内存；
+   1. 如果申请到内存，意味着扩容成功；
+   2. 如果没有申请到内存，意味着扩容失败，宿主机可能不存在空闲内存，运行时会直接中止当前程序；
+
+无论通过哪种方式获得内存页，我们都会在该函数中分配新的 [`runtime.mspan`](https://draven.co/golang/tree/runtime.mspan) 结构体；该方法的剩余部分会通过页数、内存空间以及跨度类等参数初始化它的多个字段：
+
+```go
+func (h *mheap) alloc(npages uintptr, spanclass spanClass, needzero bool) *mspan {
+	...
+HaveSpan:
+	s.init(base, npages)
+
+	...
+
+	s.freeindex = 0
+	s.allocCache = ^uint64(0)
+	s.gcmarkBits = newMarkBits(s.nelems)
+	s.allocBits = newAllocBits(s.nelems)
+	h.setSpans(s.base(), npages, s)
+	return s
+}
+```
+
+在上述代码中，我们通过调用 [`runtime.mspan.init`](https://draven.co/golang/tree/runtime.mspan.init) 设置参数初始化刚刚分配的 [`runtime.mspan`](https://draven.co/golang/tree/runtime.mspan) 结构并通过 [`runtime.mheaps.setSpans`](https://draven.co/golang/tree/runtime.mheaps.setSpans) 建立页堆与内存单元的联系。
+
+###### 扩容
+
+[`runtime.mheap.grow`](https://draven.co/golang/tree/runtime.mheap.grow) 会向操作系统申请更多的内存空间，传入的页数经过对齐可以得到期望的内存大小，我们可以将该方法的执行过程分成以下几个部分：
+
+1. 通过传入的页数获取期望分配的内存空间大小以及内存的基地址；
+2. 如果 `arena` 区域没有足够的空间，调用 [`runtime.mheap.sysAlloc`](https://draven.co/golang/tree/runtime.mheap.sysAlloc) 从操作系统中申请更多的内存；
+3. 扩容 [`runtime.mheap`](https://draven.co/golang/tree/runtime.mheap) 持有的 `arena` 区域并更新页分配器的元信息；
+4. 在某些场景下，调用 [`runtime.pageAlloc.scavenge`](https://draven.co/golang/tree/runtime.pageAlloc.scavenge) 回收不再使用的空闲内存页；
+
+在页堆扩容的过程中，[`runtime.mheap.sysAlloc`](https://draven.co/golang/tree/runtime.mheap.sysAlloc) 是页堆用来申请虚拟内存的方法，我们会分几部分介绍该方法的实现。首先，该方法会尝试在预保留的区域申请内存：
+
+```go
+func (h *mheap) sysAlloc(n uintptr) (v unsafe.Pointer, size uintptr) {
+	n = alignUp(n, heapArenaBytes)
+
+	v = h.arena.alloc(n, heapArenaBytes, &memstats.heap_sys)
+	if v != nil {
+		size = n
+		goto mapped
+	}
+	...
+}
+```
+
+上述代码会调用线性分配器的 [`runtime.linearAlloc.alloc`](https://draven.co/golang/tree/runtime.linearAlloc.alloc) 在预先保留的内存中申请一块可以使用的空间。如果没有可用的空间，我们会根据页堆的 `arenaHints` 在目标地址上尝试扩容：
+
+```go
+func (h *mheap) sysAlloc(n uintptr) (v unsafe.Pointer, size uintptr) {
+	...
+	for h.arenaHints != nil {
+		hint := h.arenaHints
+		p := hint.addr
+		v = sysReserve(unsafe.Pointer(p), n)
+		if p == uintptr(v) {
+			hint.addr = p
+			size = n
+			break
+		}
+		h.arenaHints = hint.next
+		h.arenaHintAlloc.free(unsafe.Pointer(hint))
+	}
+	...
+	sysMap(v, size, &memstats.heap_sys)
+	...
+}
+```
+
+[`runtime.sysReserve`](https://draven.co/golang/tree/runtime.sysReserve) 和 [`runtime.sysMap`](https://draven.co/golang/tree/runtime.sysMap) 是上述代码的核心部分，它们会从操作系统中申请内存并将内存转换至 `Prepared` 状态。
+
+```go
+func (h *mheap) sysAlloc(n uintptr) (v unsafe.Pointer, size uintptr) {
+	...
+mapped:
+	for ri := arenaIndex(uintptr(v)); ri <= arenaIndex(uintptr(v)+size-1); ri++ {
+		l2 := h.arenas[ri.l1()]
+		r := (*heapArena)(h.heapArenaAlloc.alloc(unsafe.Sizeof(*r), sys.PtrSize, &memstats.gc_sys))
+		...
+		h.allArenas = h.allArenas[:len(h.allArenas)+1]
+		h.allArenas[len(h.allArenas)-1] = ri
+		atomic.StorepNoWB(unsafe.Pointer(&l2[ri.l2()]), unsafe.Pointer(r))
+	}
+	return
+}
+```
+
+[`runtime.mheap.sysAlloc`](https://draven.co/golang/tree/runtime.mheap.sysAlloc) 方法在最后会初始化一个新的 [`runtime.heapArena`](https://draven.co/golang/tree/runtime.heapArena) 来管理刚刚申请的内存空间，该结构会被加入页堆的二维矩阵中。
 
 
 
@@ -6747,33 +7249,298 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 }
 ```
 
+上述代码使用 [`runtime.gomcache`](https://draven.co/golang/tree/runtime.gomcache) 获取线程缓存并判断申请内存的类型是否为指针。我们从这个代码片段可以看出 [`runtime.mallocgc`](https://draven.co/golang/tree/runtime.mallocgc) 会根据对象的大小执行不同的分配逻辑，在前面的章节也曾经介绍过运行时根据对象大小将它们分成微对象、小对象和大对象，这里会根据大小选择不同的分配逻辑：
 
+![](images/image-20250819192552602.png)
+
+- 微对象 `(0, 16B)` — 先使用微型分配器，再依次尝试线程缓存、中心缓存和堆分配内存；
+- 小对象 `[16B, 32KB]` — 依次尝试使用线程缓存、中心缓存和堆分配内存；
+- 大对象 `(32KB, +∞)` — 直接在堆上分配内存；
 
 ##### 微对象
 
+Go 语言运行时将小于 16 字节的对象划分为微对象，它会使用线程缓存上的微分配器提高微对象分配的性能，我们主要使用它来分配较小的字符串以及逃逸的临时变量。微分配器可以将多个较小的内存分配请求合入同一个内存块中，只有当内存块中的所有对象都需要被回收时，整片内存才可能被回收。
 
+微分配器管理的对象不可以是指针类型，管理多个对象的内存块大小 `maxTinySize` 是可以调整的，在默认情况下，内存块的大小为 16 字节。`maxTinySize` 的值越大，组合多个对象的可能性就越高，内存浪费也就越严重；`maxTinySize` 越小，内存浪费就会越少，不过无论如何调整，8 的倍数都是一个很好的选择。
+
+![图 7-20 微分配器的工作原理](images/image-20250819192715463.png)
+
+如上图所示，微分配器已经在 16 字节的内存块中分配了 12 字节的对象，如果下一个待分配的对象小于 4 字节，它会直接使用上述内存块的剩余部分，减少内存碎片，不过该内存块只有所有对象都被标记为垃圾时才会回收。
+
+线程缓存 [`runtime.mcache`](https://draven.co/golang/tree/runtime.mcache) 中的 `tiny` 字段指向了 `maxTinySize` 大小的块，如果当前块中还包含大小合适的空闲内存，运行时会通过基地址和偏移量获取并返回这块内存：
+
+```go
+func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
+	...
+	if size <= maxSmallSize {
+		if noscan && size < maxTinySize {
+			off := c.tinyoffset
+			if off+size <= maxTinySize && c.tiny != 0 {
+				x = unsafe.Pointer(c.tiny + off)
+				c.tinyoffset = off + size
+				c.local_tinyallocs++
+				releasem(mp)
+				return x
+			}
+			...
+		}
+		...
+	}
+	...
+}
+```
+
+当内存块中不包含空闲的内存时，下面的这段代码会先从线程缓存找到跨度类对应的内存管理单元 [`runtime.mspan`](https://draven.co/golang/tree/runtime.mspan)，调用 [`runtime.nextFreeFast`](https://draven.co/golang/tree/runtime.nextFreeFast) 获取空闲的内存；当不存在空闲内存时，我们会调用 [`runtime.mcache.nextFree`](https://draven.co/golang/tree/runtime.mcache.nextFree) 从中心缓存或者页堆中获取可分配的内存块：
+
+```go
+func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
+	...
+	if size <= maxSmallSize {
+		if noscan && size < maxTinySize {
+			...
+			span := c.alloc[tinySpanClass]
+			v := nextFreeFast(span)
+			if v == 0 {
+				v, _, _ = c.nextFree(tinySpanClass)
+			}
+			x = unsafe.Pointer(v)
+			(*[2]uint64)(x)[0] = 0
+			(*[2]uint64)(x)[1] = 0
+			if size < c.tinyoffset || c.tiny == 0 {
+				c.tiny = uintptr(x)
+				c.tinyoffset = size
+			}
+			size = maxTinySize
+		}
+		...
+	}
+	...
+	return x
+}
+```
+
+获取新的空闲内存块之后，上述代码会清空空闲内存中的数据、更新构成微对象分配器的几个字段 `tiny` 和 `tinyoffset` 并返回新的空闲内存。
 
 ##### 小对象
 
+小对象是指大小为 16 字节到 32,768 字节的对象以及所有小于 16 字节的指针类型的对象，小对象的分配可以被分成以下的三个步骤：
 
+1. 确定分配对象的大小以及跨度类 [`runtime.spanClass`](https://draven.co/golang/tree/runtime.spanClass)；
+2. 从线程缓存、中心缓存或者堆中获取内存管理单元并从内存管理单元找到空闲的内存空间；
+3. 调用 [`runtime.memclrNoHeapPointers`](https://draven.co/golang/tree/runtime.memclrNoHeapPointers) 清空空闲内存中的所有数据；
+
+确定待分配的对象大小以及跨度类需要使用预先计算好的 `size_to_class8`、`size_to_class128` 以及 `class_to_size` 字典，这些字典能够帮助我们快速获取对应的值并构建 [`runtime.spanClass`](https://draven.co/golang/tree/runtime.spanClass)：
+
+```go
+func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
+	...
+	if size <= maxSmallSize {
+		...
+		} else {
+			var sizeclass uint8
+			if size <= smallSizeMax-8 {
+				sizeclass = size_to_class8[(size+smallSizeDiv-1)/smallSizeDiv]
+			} else {
+				sizeclass = size_to_class128[(size-smallSizeMax+largeSizeDiv-1)/largeSizeDiv]
+			}
+			size = uintptr(class_to_size[sizeclass])
+			spc := makeSpanClass(sizeclass, noscan)
+			span := c.alloc[spc]
+			v := nextFreeFast(span)
+			if v == 0 {
+				v, span, _ = c.nextFree(spc)
+			}
+			x = unsafe.Pointer(v)
+			if needzero && span.needzero != 0 {
+				memclrNoHeapPointers(unsafe.Pointer(v), size)
+			}
+		}
+	} else {
+		...
+	}
+	...
+	return x
+}
+```
+
+在上述代码片段中，我们会重点分析两个方法的实现原理，它们分别是 [`runtime.nextFreeFast`](https://draven.co/golang/tree/runtime.nextFreeFast) 和 [`runtime.mcache.nextFree`](https://draven.co/golang/tree/runtime.mcache.nextFree)，这两个方法会帮助我们获取空闲的内存空间。[`runtime.nextFreeFast`](https://draven.co/golang/tree/runtime.nextFreeFast) 会利用内存管理单元中的 `allocCache` 字段，快速找到该字段为 1 的位数，我们在上面介绍过 1 表示该位对应的内存空间是空闲的：
+
+```go
+func nextFreeFast(s *mspan) gclinkptr {
+	theBit := sys.Ctz64(s.allocCache)
+	if theBit < 64 {
+		result := s.freeindex + uintptr(theBit)
+		if result < s.nelems {
+			freeidx := result + 1
+			if freeidx%64 == 0 && freeidx != s.nelems {
+				return 0
+			}
+			s.allocCache >>= uint(theBit + 1)
+			s.freeindex = freeidx
+			s.allocCount++
+			return gclinkptr(result*s.elemsize + s.base())
+		}
+	}
+	return 0
+}
+```
+
+找到了空闲的对象后，我们就可以更新内存管理单元的 `allocCache`、`freeindex` 等字段并返回该片内存；如果我们没有找到空闲的内存，运行时会通过 [`runtime.mcache.nextFree`](https://draven.co/golang/tree/runtime.mcache.nextFree) 找到新的内存管理单元：
+
+```go
+func (c *mcache) nextFree(spc spanClass) (v gclinkptr, s *mspan, shouldhelpgc bool) {
+	s = c.alloc[spc]
+	freeIndex := s.nextFreeIndex()
+	if freeIndex == s.nelems {
+		c.refill(spc)
+		s = c.alloc[spc]
+		freeIndex = s.nextFreeIndex()
+	}
+
+	v = gclinkptr(freeIndex*s.elemsize + s.base())
+	s.allocCount++
+	return
+}
+```
+
+在上述方法中，如果我们在线程缓存中没有找到可用的内存管理单元，会通过前面介绍的 [`runtime.mcache.refill`](https://draven.co/golang/tree/runtime.mcache.refill) 使用中心缓存中的内存管理单元替换已经不存在可用对象的结构体，该方法会调用新结构体的 [`runtime.mspan.nextFreeIndex`](https://draven.co/golang/tree/runtime.mspan.nextFreeIndex) 获取空闲的内存并返回。
 
 ##### 大对象
 
+运行时对于大于 32KB 的大对象会单独处理，我们不会从线程缓存或者中心缓存中获取内存管理单元，而是直接调用 [`runtime.mcache.allocLarge`](https://draven.co/golang/tree/runtime.mcache.allocLarge) 分配大片内存：
 
+```go
+func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
+	...
+	if size <= maxSmallSize {
+		...
+	} else {
+		var s *mspan
+		span = c.allocLarge(size, needzero, noscan)
+		span.freeindex = 1
+		span.allocCount = 1
+		x = unsafe.Pointer(span.base())
+		size = span.elemsize
+	}
+
+	publicationBarrier()
+	mp.mallocing = 0
+	releasem(mp)
+
+	return x
+}
+```
+
+[`runtime.mcache.allocLarge`](https://draven.co/golang/tree/runtime.mcache.allocLarge) 会计算分配该对象所需要的页数，它按照 8KB 的倍数在堆上申请内存：
+
+```go
+func (c *mcache) allocLarge(size uintptr, needzero bool, noscan bool) *mspan {
+	npages := size >> _PageShift
+	if size&_PageMask != 0 {
+		npages++
+	}
+	...
+	s := mheap_.alloc(npages, spc, needzero)
+	mheap_.central[spc].mcentral.fullSwept(mheap_.sweepgen).push(s)
+	s.limit = s.base() + size
+	heapBitsForAddr(s.base()).initSpan(s)
+	return s
+}
+```
+
+申请内存时会创建一个跨度类为 0 的 [`runtime.spanClass`](https://draven.co/golang/tree/runtime.spanClass) 并调用 [`runtime.mheap.alloc`](https://draven.co/golang/tree/runtime.mheap.alloc) 分配一个管理对应内存的管理单元。
+
+#### 73.1.4 小结
+
+内存分配是 Go 语言运行时内存管理的核心逻辑，运行时的内存分配器使用类似 TCMalloc 的分配策略将对象根据大小分类，并设计多层级的组件提高内存分配器的性能。本节不仅介绍了 Go 语言内存分配器的设计与实现原理，同时也介绍了内存分配器的常见设计，帮助我们理解不同编程语言在设计内存分配器时做出的不同选择。
+
+内存分配器虽然非常重要，但是它只解决了如何分配内存的问题，我们在本节中省略了很多与垃圾回收相关的代码，没有分析运行时垃圾回收的实现原理，在下一节中我们将详细分析 Go 语言垃圾回收的设计与实现原理。
 
 ### 73.2 垃圾收集器
+
+编程语言的内存管理系统除了负责堆内存的分配之外，它还需要负责回收不再使用的对象和内存空间。
 
 #### 73.2.1 设计原理
 
 ##### 标记清除
 
+==标记清除（Mark-Sweep）==算法是最常见的垃圾收集算法，标记清除收集器是跟踪式垃圾收集器，其执行过程可以分成==标记（Mark）==和==清除（Sweep）==两个阶段：
+
+1. 标记阶段 — 从根对象出发查找并标记堆中所有存活的对象；
+2. 清除阶段 — 遍历堆中的全部对象，回收未被标记的垃圾对象并将回收的内存加入空闲链表；
+
+如下图所示，内存空间中包含多个对象，我们从根对象出发依次遍历对象的子对象并将从根节点可达的对象都标记成存活状态，即 A、C 和 D 三个对象，剩余的 B、E 和 F 三个对象因为从根节点不可达，所以会被当做垃圾：
+
+![](images/image-20250819193350495.png)
+
+标记阶段结束后会进入清除阶段，在该阶段中收集器会依次遍历堆中的所有对象，释放其中没有被标记的 B、E 和 F 三个对象并将新的空闲内存空间以链表的结构串联起来，方便内存分配器的使用。
+
+![](images/image-20250819193416995.png)
+
+这里介绍的是最传统的标记清除算法，垃圾收集器从垃圾收集的根对象出发，递归遍历这些对象指向的子对象并将所有可达的对象标记成存活；标记阶段结束后，垃圾收集器会依次遍历堆中的对象并清除其中的垃圾，整个过程需要标记对象的存活状态，用户程序在垃圾收集的过程中也不能执行，我们需要用到更复杂的机制来解决 STW 的问题。
+
 ##### 三色抽象
+
+为了解决原始标记清除算法带来的长时间 STW，多数现代的追踪式垃圾收集器都会实现三色标记算法的变种以缩短 STW 的时间。三色标记算法将程序中的对象分成白色、黑色和灰色三类：
+
+- 白色对象 — 潜在的垃圾，其内存可能会被垃圾收集器回收；
+- 黑色对象 — 活跃的对象，包括不存在任何引用外部指针的对象以及从根对象可达的对象；
+- 灰色对象 — 活跃的对象，因为存在指向白色对象的外部指针，垃圾收集器会扫描这些对象的子对象；
+
+在垃圾收集器开始工作时，程序中不存在任何的黑色对象，垃圾收集的根对象会被标记成**灰色**，垃圾收集器只会从灰色对象集合中取出对象开始扫描，当灰色集合中不存在任何对象时，标记阶段就会结束。
+
+![三色标记垃圾收集器的执行过程](images/image-20250819193636290.png)
+
+三色标记垃圾收集器的工作原理很简单，我们可以将其归纳成以下几个步骤：
+
+1. 从灰色对象的集合中选择一个灰色对象并将其标记成黑色；
+2. 将黑色对象指向的所有对象都标记成灰色，保证该对象和被该对象引用的对象都不会被回收；
+3. 重复上述两个步骤直到对象图中不存在灰色对象；
+
+当三色的标记清除的标记阶段结束之后，应用程序的堆中就不存在任何的灰色对象，我们只能看到黑色的存活对象以及白色的垃圾对象，垃圾收集器可以回收这些白色的垃圾，下面是使用三色标记垃圾收集器执行标记后的堆内存，堆中只有对象 D 为待回收的垃圾：
+
+![三色标记后的堆](images/image-20250819193727108.png)
+
+因为用户程序可能在标记执行的过程中修改对象的指针，所以三色标记清除算法本身是不可以并发或者增量执行的，它仍然需要 STW，在如下所示的三色标记过程中，用户程序建立了从 A 对象到 D 对象的引用，但是因为程序中已经不存在灰色对象了，所以 D 对象会被垃圾收集器错误地回收。
+
+![图 7-27 三色标记与用户程序](images/image-20250819193808300.png)
+
+本来不应该被回收的对象却被回收了，这在内存管理中是非常严重的错误，我们将这种错误称为**悬挂指针**，即指针没有指向特定类型的合法对象，影响了内存的安全性，想要并发或者增量地标记对象还是需要使用屏障技术。
 
 ##### 屏障技术
 
+内存屏障技术是一种屏障指令，它可以让 CPU 或者编译器在执行内存相关操作时遵循特定的约束，目前多数的现代处理器都会乱序执行指令以最大化性能，但是该技术能够保证内存操作的顺序性，在内存屏障前执行的操作一定会先于内存屏障后执行的操作。
+
+想要在并发或者增量的标记算法中保证正确性，我们需要达成以下两种三色不变性（Tri-color invariant）中的一种：
+
+- 强三色不变性 — 黑色对象不会指向白色对象，只会指向灰色对象或者黑色对象；
+- 弱三色不变性 — 黑色对象指向的白色对象必须包含一条从灰色对象经由多个白色对象的可达路径；
+
+![图 7-28 三色不变性](images/image-20250819193945061.png)
+
+上图分别展示了遵循强三色不变性和弱三色不变性的堆内存，遵循上述两个不变性中的任意一个，我们都能保证垃圾收集算法的正确性，而屏障技术就是在并发或者增量标记过程中保证三色不变性的重要技术。
+
+垃圾收集中的屏障技术更像是一个钩子方法，它是在用户程序读取对象、创建新对象以及更新对象指针时执行的一段代码，根据操作类型的不同，我们可以将它们分成读屏障（Read barrier）和写屏障（Write barrier）两种，因为读屏障需要在读操作中加入代码片段，对用户程序的性能影响很大，所以编程语言往往都会采用写屏障保证三色不变性。
+
+我们在这里想要介绍的是 Go 语言中使用的两种写屏障技术，分别是 Dijkstra 提出的插入写屏障和 Yuasa 提出的删除写屏障，这里会分析它们如何保证三色不变性和垃圾收集器的正确性。
+
+###### 插入写屏障🔖
+
+
+
+###### 删除写屏障
+
+
+
+
+
 ##### 增量和并发
 
+###### 增量收集器
 
+
+
+###### 并发收集器
 
 #### 73.2.2 演进过程
 
@@ -6797,9 +7564,15 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 
 ##### 并发垃圾收集
 
+
+
 ##### 回收堆目标
 
+
+
 ##### 混合写屏障
+
+
 
 #### 73.2.3 实现原理
 
@@ -6831,21 +7604,79 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 
 #### 73.3.1 设计原理
 
+栈区的内存一般由编译器自动分配和释放，其中存储着函数的入参以及局部变量，这些参数会随着函数的创建而创建，函数的返回而消亡，一般不会在程序中长期存在，这种线性的内存分配策略有着极高地效率，但是工程师也往往不能控制栈内存的分配，这部分工作基本都是由编译器完成的。
+
 ##### 寄存器
+
+寄存器是中央处理器（CPU）中的稀缺资源，它的存储能力非常有限，但是能提供最快的读写速度，充分利用寄存器的速度可以构建高性能的应用程序。寄存器在物理机上非常有限，然而栈区的操作会使用到两个以上的寄存器，这足以说明栈内存在应用程序的重要性。
+
+**栈寄存器是 CPU 寄存器中的一种**，它的主要作用是**跟踪函数的调用栈**，Go 语言的汇编代码包含 ==BP== 和 ==SP== 两个栈寄存器，它们分别存储了栈的**基址指针和栈顶的地址**，栈内存与函数调用的关系非常紧密，我们在函数调用一节中曾经介绍过栈区，BP 和 SP 之间的内存就是当前函数的调用栈。
+
+![图 7-43 栈寄存器与内存](images/image-20250819194607279.png)
+
+因为历史原因，栈区内存都是从高地址向低地址扩展的，当应用程序申请或者释放栈内存时只需要修改 SP 寄存器的值，这种线性的内存分配方式与堆内存相比更加快速，仅会带来极少的额外开销。
 
 ##### 线程栈
 
+如果我们在 Linux 操作系统中执行 `pthread_create` 系统调用，进程会启动一个新的线程，如果用户没有通过软资源限制 `RLIMIT_STACK` 指定线程栈的大小，那么操作系统会根据架构选择不同的默认栈大小。
+
+| 架构    | 默认栈大小 |
+| :------ | ---------: |
+| i386    |       2 MB |
+| IA-64   |      32 MB |
+| PowerPC |       4 MB |
+| …       |          … |
+| x86_64  |       2 MB |
+
+**表 7-4 架构和线程默认栈大小**
+
+多数架构上默认栈大小都在 2 ~ 4 MB 左右，极少数架构会使用 32 MB 的栈，用户程序可以在分配的栈上存储函数参数和局部变量。然而这个固定的栈大小在某些场景下不是合适的值，如果程序需要同时运行几百个甚至上千个线程，这些线程中的大部分都只会用到很少的栈空间，当函数的调用栈非常深时，固定栈大小也无法满足用户程序的需求。
+
+线程和进程都是代码执行的上下文，但是如果一个应用程序包含成百上千个执行上下文并且每个上下文都是线程，会占用大量的内存空间并带来其他的额外开销，Go 语言在设计时认为执行上下文是轻量级的，所以它在用户态实现 Goroutine 作为执行上下文。
+
 ##### 逃逸分析
+
+
+
+
 
 ##### 栈内存空间
 
+###### 分段栈
+
+###### 连续栈
+
+
+
 #### 73.3.2 栈操作
+
+Go 语言中的执行栈由 [`runtime.stack`](https://draven.co/golang/tree/runtime.stack) 表示，该结构体中只包含两个字段，分别表示栈的顶部和栈的底部，每个栈结构体都表示范围为 `[lo, hi)` 的内存空间：
+
+```go
+type stack struct {
+	lo uintptr
+	hi uintptr
+}
+```
+
+栈的结构虽然非常简单，但是想要理解 Goroutine 栈的实现原理，还是需要我们从编译期间和运行时两个阶段入手：
+
+1. 编译器会在编译阶段会通过 [`cmd/internal/obj/x86.stacksplit`](https://draven.co/golang/tree/cmd/internal/obj/x86.stacksplit) 在调用函数前插入 [`runtime.morestack`](https://draven.co/golang/tree/runtime.morestack) 或者 [`runtime.morestack_noctxt`](https://draven.co/golang/tree/runtime.morestack_noctxt) 函数；
+2. 运行时在创建新的 Goroutine 时会在 [`runtime.malg`](https://draven.co/golang/tree/runtime.malg) 中调用 [`runtime.stackalloc`](https://draven.co/golang/tree/runtime.stackalloc) 申请新的栈内存，并在编译器插入的 [`runtime.morestack`](https://draven.co/golang/tree/runtime.morestack) 中检查栈空间是否充足；
+
+需要注意的是，Go 语言的编译器不会为所有的函数插入 [`runtime.morestack`](https://draven.co/golang/tree/runtime.morestack)，它只会在必要时插入指令以减少运行时的额外开销，编译指令 `nosplit` 可以跳过栈溢出的检查，虽然这能降低一些开销，不过固定大小的栈也存在溢出的风险。本节将分别分析栈的初始化、创建 Goroutine 时栈的分配、编译器和运行时协作完成的栈扩容以及当栈空间利用率不足时的缩容过程。
 
 ##### 栈初始化
 
+
+
 ##### 栈分配
 
+
+
 ##### 栈扩容
+
+
 
 ##### 栈缩容
 
