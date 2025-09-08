@@ -4602,7 +4602,7 @@ Go是自带运行时的跨平台编程语言，Go中暴露给语言使用者的T
 
 通常用**阻塞（Blocking）和非阻塞（Non-Blocking）**来描述网络I/O模型。不同标准对于网络I/O模型的说法有所不同，比如POSIX.1标准还定义了同步（Sync）和异步（Async）这两个术语来描述模型。
 
-阻塞和非阻塞是**以内核是否等数据全部就绪才返回（给发起系统调用的应用线程）来区分的**。如果内核一直等到全部数据就绪才返回，则这种行为模式称为**阻塞（Blocking）**；如果内核查看数据就绪状态后，即便没有就绪也立即返回错误（给发起系统调用的应用线程），则这种行为模式称为**非阻塞（Non-Blocking）**。
+阻塞和非阻塞是**以==内核是否等数据全部就绪才返回==（给发起系统调用的应用线程）来区分的**。如果内核一直等到全部数据就绪才返回，则这种行为模式称为**阻塞（Blocking）**；如果内核查看数据就绪状态后，即便没有就绪也立即返回错误（给发起系统调用的应用线程），则这种行为模式称为**非阻塞（Non-Blocking）**。
 
 常用的网络I/O模型包括:
 
@@ -4620,17 +4620,17 @@ Go是自带运行时的跨平台编程语言，Go中暴露给语言使用者的T
 
 在非阻塞模型下，在用户空间线程向操作系统内核发起I/O请求后，内核会执行该I/O操作。如果此刻数据尚未就绪，则会立即将“未就绪”的状态以错误码形式（如EAGAIN/EWOULDBLOCK）返回给此次I/O系统调用的发起者。而后者则根据系统调用的返回状态决定下一步如何做。
 
-在非阻塞模型下，位于用户空间的I/O请求发起者通常会通过轮询的方式一次次发起I/O请求，直到读到所需的数据。不过，这样的轮询是对CPU计算资源的极大浪费，因此非阻塞I/O模型单独应用的比例并不高。阻塞的Socket默认可以通过fcntl调用转变为非阻塞Socket。
+在非阻塞模型下，位于用户空间的I/O请求发起者通常会通过**轮询**的方式一次次发起I/O请求，直到读到所需的数据。不过，这样的轮询是对CPU计算资源的极大浪费，因此**非阻塞I/O模型单独应用的比例并不高**。阻塞的Socket默认可以通过`fcntl`调用转变为非阻塞Socket。
 
 #### 3 I/O多路复用模型
 
 为了避免非阻塞I/O模型轮询对计算资源的浪费以及阻塞I/O模型的低效，开发人员开始首选I/O多路复用模型作为网络I/O模型。
 
-I/O多路复用模型建立在操作系统提供的select/poll等多路复用函数（以及性能更好的epoll等函数）的基础上。
+I/O多路复用模型建立在操作系统提供的`select/poll`等多路复用函数（以及性能更好的`epoll`等函数）的基础上。
 
 ![](images/image-20250724120849800.png)
 
-该模型下，应用线程首先将需要进行I/O操作的Socket都添加到多路复用函数中（这里以select为例），接着阻塞，等待select系统调用返回。当内核发现有数据到达时，对应的Socket具备通信条件，select函数返回。然后用户线程针对该Socket再次发起网络I/O请求（如read）。由于数据已就绪，因此即便Socket是阻塞的，第二次网络I/O操作也非常快。
+该模型下，应用线程首先将需要进行I/O操作的Socket都添加到**多路复用函数**中（这里以select为例），接着阻塞，等待select系统调用返回。当内核发现有数据到达时，对应的Socket具备通信条件，select函数返回。然后用户线程针对该Socket再次发起网络I/O请求（如read）。由于数据已就绪，因此即便Socket是阻塞的，第二次网络I/O操作也非常快。
 
 阻塞模型一个线程仅能处理一个Socket，而在I/O多路复用模型中，应用线程可以同时处理多个Socket；虽然可同时处理多个Socket，但I/O多路复用模型**由内核实现可读/可写事件的通知**，避免了非阻塞模型中轮询带来的CPU计算资源的浪费。
 
@@ -4640,15 +4640,13 @@ I/O多路复用模型建立在操作系统提供的select/poll等多路复用函
 
 ![](images/image-20250724120916210.png)
 
-用户应用线程发起异步I/O调用后，内核将启动等待数据的操作并马上返回。
+用户应用线程发起异步I/O调用后，内核将启动等待数据的操作**并马上返回**。
 
-之后，用户应用线程可以继续执行其他操作，既无须阻塞，也无须轮询并再次发起I/O调用。在内核空间数据就绪并被从内核空间复制到用户空间后，内核会主动生成信号以驱动执行用户线程在异步I/O调用时注册的信号处理函数，或主动执行用户线程注册的回调函数，让用户线程完成对数据的处理。
+之后，用户应用线程可以继续执行其他操作，**既无须阻塞，也无须轮询并再次发起I/O调用**。在内核空间数据就绪并被从内核空间复制到用户空间后，内核会主动生成信号以驱动执行用户线程在异步I/O调用时注册的信号处理函数，或主动执行用户线程注册的回调函数，让用户线程完成对数据的处理。
 
-相较于上述几个模型，异步I/O模型受各个平台的支持程度不一，且使用起来复杂度较高，在如何进行内存管理、信号处理/回调函数等逻辑设计上会给开发人员带来不小的心智负担。
+相较于上述几个模型，异步I/O模型受各个平台的支持程度不一，且**使用起来复杂度较高**，在如何进行**内存管理、信号处理/回调函数**等逻辑设计上会给开发人员带来不小的心智负担。
 
-
-
-有些标准使用同步和异步来描述网络I/O操作模型。所谓同步I/O指的是能引起请求线程阻塞，直到I/O操作完成；而异步I/O则不引起请求线程的阻塞。按照这个说法，前面提到的阻塞I/O、非阻塞I/O、I/O多路复用均可看成同步I/O模型，而只有异步I/O才是名副其实的“异步I/O”模型。
+有些标准使用同步和异步来描述网络I/O操作模型。所谓**同步I/O指的是能引起请求线程阻塞，直到I/O操作完成；而异步I/O则不引起请求线程的阻塞**。按照这个说法，前面提到的<u>阻塞I/O、非阻塞I/O、I/O多路复用均可看成同步I/O模型，而只有异步I/O才是名副其实的“异步I/O”模型</u>。
 
 伴随着模型的演进，服务程序愈发强大，可以支持更多的连接，获得更好的处理性能。目前**主流网络服务器采用的多是I/O多路复用模型**，有的也结合了多线程。不过I/O多路复用模型在支持更多连接、提升I/O操作效率的同时，也给使用者带来了不低的复杂性，以至于出现了许多高性能的I/O多路复用框架（如libevent、libev、libuv等）以降低开发复杂性，减轻开发者的心智负担。
 
@@ -4706,7 +4704,7 @@ func sysSocket(family, sotype, proto int) (int, error) {
 
 Go语言在netpoller中采用了I/O多路复用模型。考虑到最常见的多路复用系统调用select有比较多的限制，比如**监听Socket的数量有上限（1024）、时间复杂度高**等，Go运行时选择了在不同操作系统上使用操作系统各自实现的高性能多路复用函数，比如Linux上的`epoll`、Windows上的`iocp`、FreeBSD/macOS上的`kqueue`、Solaris上的`event port`等，这样可以最大限度地提高netpoller的调度和执行性能。
 
-### 63.2 TCP连接的建立 🔖
+### 63.2 TCP连接的建立
 
 众所周知，建立TCP Socket连接需要经历客户端和服务端的三次握手过程。在连接的建立过程中，服务端是一个标准的**Listen+Accept**的结构（可参考上面的代码），而在客户端Go语言使用**Dial或DialTimeout函数**发起连接建立请求。
 
@@ -4736,7 +4734,23 @@ if err != nil {
 
 如果传给Dial的服务端地址是网络不可达的，或者服务地址中端口对应的服务并没有启动，端口未被监听（Listen），则Dial几乎会立即返回错误。
 
+```go
+func main() {
+	log.Println("begin dial...")
+	conn, err := net.Dial("tcp", ":8888")
+	if err != nil {
+		log.Println("dial error:", err)
+		return
+	}
+	defer conn.Close()
+	log.Println("dial ok")
+}
+```
 
+```
+2025/08/08 11:06:31 begin dial...
+2025/08/08 11:06:31 dial error: dial tcp :8888: connect: connection refused
+```
 
 #### 2 对方服务的listen backlog队列满了
 
@@ -4744,9 +4758,17 @@ if err != nil {
 
 
 
+```sh
+$ sysctl -a | grep kern.ipc.somaxconn
+kern.ipc.somaxconn: 128
+```
+
+
+
 #### 3 若网络延迟较大，Dial将阻塞并超时
 
 如果网络延迟较大，TCP握手过程将更加艰难坎坷（经历各种丢包），时间消耗自然也会更长，Dial此时会阻塞。如果经过长时间阻塞后依旧无法建立连接，那么Dial也会返回类似“getsockopt: operation timed out”的错误。
+
 在连接建立阶段，多数情况下Dial是可以满足需求的，即便是阻塞一小会儿。但对于那些有严格的连接时间限定的Go应用，如果一定时间内没能成功建立连接，程序可能需要执行一段异常处理逻辑，为此我们就需要DialTimeout函数了。
 
 
@@ -4755,19 +4777,71 @@ if err != nil {
 
 ### 63.3 Socket读写🔖
 
+**连接建立起来后，就要在连接上进行读写以完成业务逻辑。**
 
+前面说过，**Go运行时隐藏了I/O多路复用的复杂性**。
+
+语言使用者只需采用goroutine+阻塞I/O模型即可满足大部分场景需求。Dial连接成功后会返回一个net.Conn接口类型的变量值，这个接口变量的底层类型为一个`*TCPConn`:
+
+```go
+//$GOROOT/src/net/tcpsock_posix.go
+type TCPConn struct {
+  conn
+}
+```
+
+TCPConn内嵌了一个非导出类型conn，因此“继承”了conn类型的Read和Write方法，后续通过Dial函数返回值调用的Write和Read方法均是net.conn的方法：
+
+```go
+//$GOROOT/src/net/net.go
+type conn struct {
+	fd *netFD
+}
+
+func (c *conn) ok() bool { return c != nil && c.fd != nil }
+
+// 实现Conn接口￼
+
+func (c *conn) Read(b []byte) (int, error) {
+	if !c.ok() {
+		return 0, syscall.EINVAL
+	}
+	n, err := c.fd.Read(b)
+	if err != nil && err != io.EOF {
+		err = &OpError{Op: "read", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+	}
+	return n, err
+}
+
+func (c *conn) Write(b []byte) (int, error) {
+	if !c.ok() {
+		return 0, syscall.EINVAL
+	}
+	n, err := c.fd.Write(b)
+	if err != nil {
+		err = &OpError{Op: "write", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+	}
+	return n, err
+}
+```
 
 通过几个场景来总结一下conn.Read的行为特点
 
 #### 1 Socket中无数据
 
+连接建立后，如果客户端未发送数据，服务端会阻塞在Socket的读操作上，这和前面提到的阻塞I/O模型的行为模式是一致的。执行该读操作的goroutine也会被挂起。Go运行时会监视该Socket，直到其有数据读事件才会重新调度该Socket对应的goroutine完成读操作。
+
 
 
 #### 2 Socket中有部分数据
 
+如果Socket中有部分数据就绪，且数据数量小于一次读操作所期望读出的数据长度，那么读操作将会成功读出这部分数据并返回，而不是等待期望长度数据全部读取后再返回。
+
 
 
 #### 3 Socket中有足够多的数据
+
+如果连接上有数据，且数据长度大于或等于一次Read操作所期望读出的数据长度，那么Read将会成功读出这部分数据并返回。
 
 
 
@@ -4803,19 +4877,32 @@ if err != nil {
 
 ### 63.4 Socket属性
 
+原生Socket API提供了丰富的sockopt设置接口，而Go有自己的网络编程模型。Go提供的socket options接口也是基于上述模型的必要的属性设置，包括SetKeepAlive、SetKeep-AlivePeriod、SetLinger、SetNoDelay （默认为no delay）、SetWriteBuffer、SetReadBuffer。
 
+不过上面的方法是TCPConn类型的，而不是Conn类型的。要使用上面的方法，需要进行类型断言（type assertion）操作：
+
+```go
+tcpConn, ok := c.(*TCPConn)
+if !ok {
+  // 错误处理
+}
+
+tcpConn.SetNoDelay(true)
+```
+
+对于listener的监听Socket，Go默认设置了SO_REUSEADDR，这样当你重启服务程序时，不会因为address in use的错误而重启失败。
 
 ### 63.5 关闭连接
 
 
 
-## 64 使用net/http包实现安全通信 🔖
-
-
+## 64 使用net/http包实现安全通信
 
 ### 64.1 HTTPS：在安全传输层上运行的HTTP协议
 
+![](images/image-20250908113649468.png)
 
+![](images/image-20250908113723024.png)
 
 HTTPS协议就是用来解决传统HTTP协议明文传输不安全的问题的。与普通HTTP协议不同，HTTPS协议在传输层（TCP协议）和应用层（HTTP协议）之间增加了一个==安全传输层==：
 
@@ -4823,7 +4910,19 @@ HTTPS协议就是用来解决传统HTTP协议明文传输不安全的问题的�
 
 安全传输层通常采用**SSL（Secure Socket Layer）**或**TLS（Transport Layer Security）**协议实现（Go标准库支持TLS 1.3版本协议）。这一层负责HTTP协议传输的**内容加密、通信双方身份验证**等。有了这一层后，HTTP协议就摇身一变，成为拥有**加密、证书身份验证和内容完整性保护功能**的HTTPS协议了。或者反过来说，==HTTPS协议就是在安全传输层上运行的HTTP协议==。
 
+Go标准库net/http包同样提供了对采用HTTPS协议的Web服务的支持。只需修改一行代码就能将上面示例中的那个基于HTTP协议的Web服务改为一个采用HTTPS协议的Web服务：
 
+```go
+func main() {
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("hello https"))
+		fmt.Fprintf(w, " golang \n")
+	})
+	fmt.Println(http.ListenAndServeTLS(":8081", "server.crt", "server.key", nil))
+}
+```
+
+`http.ListenAndServeTLS`有两个参数certFile和keyFile，是http包针对HTTPS协议进行内容加密、身份验证和内容完整性验证的前提。
 
 用openssl工具可以生成该示例中HTTPS Web服务所需的server.key和server.crt，并让这个示例中的服务运行起来：
 
@@ -4832,35 +4931,150 @@ $ openssl genrsa -out server.key 2048
 $ openssl req -new -x509 -key server.key -out server.crt -days 365
 ```
 
+https://localhost:8081/，浏览器会显示警告页面（因为我们使用的是自签名证书）
 
+使用curl访问要加-k。
 
+```sh
+$ curl -k https://localhost:8081/
+hello https golang 
+$ curl https://localhost:8081/
+curl: (60) SSL certificate problem: self signed certificate
+More details here: https://curl.se/docs/sslcerts.html
 
+curl failed to verify the legitimacy of the server and therefore could not
+establish a secure connection to it. To learn more about this situation and
+how to fix it, please visit the web page mentioned above.
+```
 
-
+报错的主要原因是示例中HTTPS Web服务所使用证书（server.crt）是我们自己生成的自签名证书，curl使用测试环境系统中内置的各种数字证书授权机构的公钥证书无法对其进行验证。而-k选项则表示忽略对示例中HTTPS Web服务的服务端证书的校验。
 
 ### 64.2 HTTPS安全传输层的工作机制
 
+HTTPS是建构在基于SSL/TLS协议实现的传输安全层之上的HTTP协议，也就是说，一旦通信双方在传输安全层上成功建立连接，那么**后续的通信就和普通HTTP协议一样**，只不过所有的HTTP协议数据经过安全层传输时都会被自动加密/解密。
 
+安全传输层是整个HTTPS协议的核心，了解其工作机制对理解HTTPS协议至关重要。
+
+通过curl命令探究安全传输层连接的建立过程:
+
+```sh
+$ curl -v -k https://127.0.0.1:8081/
+*   Trying 127.0.0.1:8081...
+* Connected to 127.0.0.1 (127.0.0.1) port 8081
+* ALPN: curl offers h2,http/1.1
+* (304) (OUT), TLS handshake, Client hello (1):
+* (304) (IN), TLS handshake, Server hello (2):
+* (304) (IN), TLS handshake, Unknown (8):
+* (304) (IN), TLS handshake, Certificate (11):
+* (304) (IN), TLS handshake, CERT verify (15):
+* (304) (IN), TLS handshake, Finished (20):
+* (304) (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / AEAD-CHACHA20-POLY1305-SHA256 / [blank] / UNDEF
+* ALPN: server accepted h2
+* Server certificate:
+*  subject: C=AU; ST=Some-State; O=Internet Widgits Pty Ltd
+*  start date: Sep  8 03:47:07 2025 GMT
+*  expire date: Sep  8 03:47:07 2026 GMT
+*  issuer: C=AU; ST=Some-State; O=Internet Widgits Pty Ltd
+*  SSL certificate verify result: self signed certificate (18), continuing anyway.
+* using HTTP/2
+* [HTTP/2] [1] OPENED stream for https://127.0.0.1:8081/
+* [HTTP/2] [1] [:method: GET]
+* [HTTP/2] [1] [:scheme: https]
+* [HTTP/2] [1] [:authority: 127.0.0.1:8081]
+* [HTTP/2] [1] [:path: /]
+* [HTTP/2] [1] [user-agent: curl/8.7.1]
+* [HTTP/2] [1] [accept: */*]
+> GET / HTTP/2
+> Host: 127.0.0.1:8081
+> User-Agent: curl/8.7.1
+> Accept: */*
+> 
+* Request completely sent off
+< HTTP/2 200 
+< content-type: text/plain; charset=utf-8
+< content-length: 20
+< date: Mon, 08 Sep 2025 03:54:55 GMT
+< 
+hello https golang 
+* Connection #0 to host 127.0.0.1 left intact
+```
 
 ![](images/image-20250724124600204.png)
 
+安全传输层建立连接的过程也称为**“握手阶段”（handshake）**，涉及四轮通信：
 
+1. ClientHello（客户端 → 服务端）
 
-### 64.3 非对称加密和公钥证书
+   客户端向服务端发出建立安全层传输连接，构建加密通信通道的请求。在这个请求中，客户端会向服务端提供本地最新TLS版本、支持的加密算法组合的集合（比如上面curl示例所建立的安全层传输会话最终选择的ECDHE-RSA-AES128-GCM-SHA256组合）以及随机数等。
 
+2. ServerHello & Server certificate &ServerKeyExchange（服务端 → 客户端）
 
+   这一轮通信分为三个重要步骤。
+
+   - 第一步，服务端收到客户端发过来的ClientHello请求后，用客户端发来的信息与自己本地支持的TLS版本、加密算法组合的集合做比较，选出一个TLS版本和一个合适的加密算法组合，然后生成一个随机数，一起打包到ServerHello中返回给客户端。
+
+   - 第二步，服务器会将自己的服务端公钥证书发送给客户端（Server certificate），这个服务端公钥证书身兼两大职责：客户端对服务端身份的验证以及后续双方会话密钥的协商和生成。
+
+     如果服务端要验证客户端身份（可选的），那么这里服务端还会发送一个CertificateRequest的请求给客户端，要求对客户端的公钥证书进行验证。
+
+   - 第三步，发送开启双方会话密钥协商的请求（ServerKeyExchange）。相比非对称加密算法，对称加密算法的性能要高出几个数量级，因此HTTPS在开始真正传输应用层的用户数据之前，选择了在非对称加密算法的帮助下协商一个基于对称加密算法的密钥。在密钥协商环节，通常会使用到Diffie-Hellman（DH）密钥交换算法，这是一种密钥协商的协议，支持通信双方在不安全的通道上生成对称加密算法所需的共享密钥。因此，在这个步骤的请求中，服务端会向客户端发送密钥交换算法的相关参数信息。
+
+   - 最后，服务端以Server Finished（又称为ServerDone）作为该轮通信的结束标志。
+
+3. ClientKeyExchange & ClientChangeCipher & Finished （客户端 → 服务端）
+
+   客户端在收到服务端的公钥证书后会对服务端的身份进行验证（当然也可以选择不验证），如果验证失败，则此次安全传输层连接建立就会以失败告终。
+
+   如果验证通过，那么客户端将从证书中提取出服务端的公钥，用于加密后续协商密钥时发送给服务端的信息。
+
+   如果服务端要求对客户端进行身份验证（接到服务端发送的CertificateRequest请求），那么客户端还需通过ClientCertificate将自己的公钥证书发送给服务端进行验证。
+
+   收到服务端对称加密共享密钥协商的请求后，客户端根据之前的随机数、确定的加密算法组合以及服务端发来的参数计算出最终的会话密钥，然后将服务端单独计算出会话密钥所需的信息用服务端的公钥加密后以ClientKeyExchange请求发送给服务端。
+
+   随后客户端用ClientChangeCipher通知服务端从现在开始发送的消息都是加密过的。
+
+   最后，伴随着ClientChangeCipher消息，总会有一个Finished消息来验证双方的对称加密共享密钥协商是否成功。其验证的方法就是通过协商好的新共享密钥和对称加密算法对一段特定内容进行加密，并以服务端是否能够正确解密该请求报文作为密钥协商成功与否的判定标准。而被加密的这段特定内容包含的是连接至今的全部报文内容。Finished报文作为该轮通信的结束标志，也是客户端发出的第一条使用协商密钥加密的信息。
+
+4. ServerChangeCipher & Finished（服务端 → 客户端）
+
+   服务端收到客户端发过来的ClientKeyExchange中的参数后，也将单独计算出会话密钥。之后和客户端一样，服务端用ServerChangeCipher通知客户端从现在开始发送的消息都是加密过的。
+
+   最后，服务端用一个Finished消息跟在ServerChangeCipher后面，既用于标识该轮握手结束，也用于验证对方计算出来的共享密钥是否有效。这也是服务端发出的第一条使用协商密钥加密的信息。
+
+   一旦HTTPS安全传输层的连接成功建立起来，后续双方通信的内容（应用层的HTTP协议）就会在一个经过加密处理的安全通道中得以传输。
+
+### 64.3 非对称加密和公钥证书 🔖
+
+在上面HTTPS安全传输层连接的建立过程中，服务端的公钥证书在验证服务端身份以及辅助对称加密算法共享密钥的协商和生成方面起到了关键作用。
+
+公钥证书（public-key certificate）是非对称加密体系的重要内容。所谓非对称加密体系，又称公钥加密体系，是和我们熟知的对称加密体系相对的，两者的对比见图51-6。
+
+从图51-6中我们看到：对称加密指的是通信双方使用一个共享密钥，该密钥既用于传输数据的加密（发送方），也用于数据的解密（接收方）；而非对称加密则指通信的每一方都有两个密钥，一个公钥（public key），一个私钥（private key）。通信的发送方（如图51-6中的A）使用对方（如图51-6中的B）的公钥对数据进行加密，数据接收方（如图51-6中B）使用自己的私钥对数据进行解密。
+
+对称加密和非对称加密各有优缺点。
+
+对称加密性能好，但密钥的保存、管理和分发存在较大安全风险；而非对称加密就是为了解决对称加密的密钥分发安全隐患而设计的。
+
+在非对称加密体系中，任何参与通信的一方都有两把密钥，一把是需要自己保存好的私钥，一把则是对外公开的、用于加密的公钥。以图51-6中的A为例，任何想与A通信的另一方都可以获取到A的公钥，并将通过这把公钥加密的消息发给A。A使用自己的私钥可以对收到的消息进行解密。由于公钥是公开的，因此其分发的安全风险显然要比对称加密低很多。不过，非对称加密的性能相较于对称加密要差很多，这也是在实际应用（比如HTTPS的传输安全层）中会将两种加密方式结合使用的原因。
 
 ![](images/image-20250724124658281.png)
 
+非对称加密体系的公钥是对外公开的，这大大降低了密钥分发的复杂性。但直接分发公钥信息仍然可能存在安全隐患。比如上面HTTPS协议安全传输层连接建立的过程中，如何保证HTTPS服务端发送给客户端的公钥信息没有被篡改呢？我们也看到了HTTPS建立连接的过程并非直接传输公钥信息，而是使用携带公钥信息的数字证书来保证公钥信息的正确性和完整性。
 
+==数字证书==，被称为互联网上的“身份证”，用于唯一标识网络上的一个域名地址或一台服务器主机，这就好比我们日常生活中使用的“居民身份证”，用于唯一标识一个公民。服务端将包含公钥信息的数字证书传输给客户端，客户端如何校验这个证书的真伪呢？我们知道居民身份证是由国家统一制作和颁发的，个体公民向户口所在地公安机关申请办理。只有国家颁发的身份证才是具有法律效力的，在中国境内这个身份证都是有效和可被接纳的。大悦城的会员卡也是一种身份标识，但你不能用它去买机票，因为航空公司不认大悦城的会员卡，只认居民身份证。网站的证书也是同样的道理。一般来说，数字证书是从受信的权威证书授权机构（CA）买来的，当然也有免费的。一般浏览器或操作系统在出厂时就内置了诸多知名CA（如Verisign、GoDaddy、CNNIC等）的公钥数字证书，这些CA的公钥证书可以用于验证这些CA机构为网站颁发的公钥证书。对于这些内置CA公钥证书无法识别的证书，浏览器就会报错，就像上面Chrome浏览器针对我们的那个自签名证书报错那样。
 
+那么CA的公钥证书是如何校验服务端公钥证书的有效性的呢？这就涉及数字公钥证书到底是什么的问题了。
 
+我们可以通过浏览器中的“HTTPS/SSL证书管理”来查看证书的内容。一般公钥证书都会包含站点的名称、主机名、公钥、证书签发机构（CA）名称和来自签发机构的签名等。我们重点关注来自签发机构的签名，因为对于公钥证书的校验方法就是使用本地CA公钥证书来验证来自通信对端的公钥证书中的签名是不是这个CA签的。
+
+下面就来看看公钥证书的申请与校验过程，如图51-7所示。
 
 ![](images/image-20250724124801528.png)
 
 
 
-
+🔖
 
 ### 64.4 对服务端公钥证书的校验
 

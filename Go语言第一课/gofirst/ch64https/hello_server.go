@@ -6,8 +6,8 @@ import (
 )
 
 func main() {
-	http.HandleFunc("/", func(writer http.ResponseWriter, r *http.Request) {
-		fmt.Println("hello golang \n")
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "hello golang \n")
 	})
 	http.ListenAndServe(":8080", nil)
 
