@@ -2491,15 +2491,19 @@ capacity是pool的一个属性，代表整个pool中worker的最大容量。我�
 
 这张图里，我们把用户要提交给workerpool执行的请求抽象为一个Task。Task的提交与调度也很简单：Task通过Schedule函数提交到一个task channel中，已经创建的worker将从这个task channel中读取task并执行。
 
-
-
 ### 35.3 workerpool的一个最小可行实现
+
+workerpool包对外主要提供三个API，它们分别是：
+
+- workerpool.New：用于创建一个pool类型实例，并将pool池的worker管理机制运行起来；
+- workerpool.Free：用于销毁一个pool池，停掉所有pool池中的worker；
+- Pool.Schedule：这是Pool类型的一个导出方法，workerpool包的用户通过该方法向pool池提交待执行的任务（Task）。
 
 
 
 ### 35.4 添加功能选项机制
 
-
+功能选项机制，可以让某个包的用户可以根据自己的需求，通过设置不同功能选项来定制包的行为。Go语言中实现功能选项机制有多种方法，但Go社区目前使用最为广泛的一个方案，是Go语言之父Rob Pike在2014年在博文[《自引用函数与选项设计》](https://commandcenter.blogspot.com/2014/01/self-referential-functions-and-design.html)中论述的一种，这种方案也被后人称为“功能选项（functional option）”方案。
 
 
 
