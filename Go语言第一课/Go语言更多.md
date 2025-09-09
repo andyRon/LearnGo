@@ -1572,6 +1572,16 @@ type CacheableParam interface{ ... }
 ...
 ```
 
+```
+go doc github.com/gin-gonic/gin
+go doc github.com/gin-gonic/gin.Engine
+go doc github.com/gin-gonic/gin.Context.JSON
+go doc -all github.com/gin-gonic/gin  // 使用 -all 标志可列出包内所有导出的类型、函数、方法等详细文档
+go doc -short github.com/gin-gonic/gin  // 简洁输出（仅含声明，不含详细描述）
+go doc -u github.com/gin-gonic/gin  // 包含未导出成员（通常用于调试）
+go doc -src github.com/gin-gonic/gin.New  // 查看函数/类型的源代码实现
+```
+
 - 查看源码
 
 ```sh
