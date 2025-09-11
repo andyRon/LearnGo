@@ -1634,7 +1634,17 @@ go doc -all <包名>
 go doc -all slices
 ```
 
+##### go doc学习代码库技巧
 
+库函数 > 结构定义 > 结构函数
+
+```
+go doc net/http | grep "^func"
+
+go doc net/http | grep "^type"|grep struct
+```
+
+结构函数需要使用IDE查看了。
 
 ### 49.6 模块管理
 
