@@ -7698,12 +7698,12 @@ func (c *mcache) allocLarge(size uintptr, needzero bool, noscan bool) *mspan {
 
 ##### 标记清除
 
-==标记清除（Mark-Sweep）==算法是最常见的垃圾收集算法，标记清除收集器是跟踪式垃圾收集器，其执行过程可以分成==标记（Mark）==和==清除（Sweep）==两个阶段：
+==标记清除（Mark-Sweep）==算法是最常见的垃圾收集算法，标记清除收集器是**跟踪式**垃圾收集器，其执行过程可以分成==标记（Mark）==和==清除（Sweep）==两个阶段：
 
 1. 标记阶段 — 从根对象出发查找并标记堆中所有存活的对象；
 2. 清除阶段 — 遍历堆中的全部对象，回收未被标记的垃圾对象并将回收的内存加入空闲链表；
 
-如下图所示，内存空间中包含多个对象，我们从根对象出发依次遍历对象的子对象并将从根节点可达的对象都标记成存活状态，即 A、C 和 D 三个对象，剩余的 B、E 和 F 三个对象因为从根节点不可达，所以会被当做垃圾：
+如下图所示，内存空间中包含多个对象，我们从根对象出发依次遍历对象的子对象并将从根节点可达的对象都标记成存活状态，即 A、C 和 D 三个对象，剩余的 B、E 和 F 三个对象因为**从根节点不可达**，所以会被当做垃圾：
 
 ![](images/image-20250819193350495.png)
 
@@ -7711,7 +7711,7 @@ func (c *mcache) allocLarge(size uintptr, needzero bool, noscan bool) *mspan {
 
 ![](images/image-20250819193416995.png)
 
-这里介绍的是最传统的标记清除算法，垃圾收集器从垃圾收集的根对象出发，递归遍历这些对象指向的子对象并将所有可达的对象标记成存活；标记阶段结束后，垃圾收集器会依次遍历堆中的对象并清除其中的垃圾，整个过程需要标记对象的存活状态，用户程序在垃圾收集的过程中也不能执行，我们需要用到更复杂的机制来解决 STW 的问题。
+这里介绍的是最传统的标记清除算法，垃圾收集器从垃圾收集的根对象出发，递归遍历这些对象指向的子对象并将所有可达的对象标记成存活；标记阶段结束后，垃圾收集器会依次遍历堆中的对象并清除其中的垃圾，整个过程需要标记对象的存活状态，用户程序在垃圾收集的过程中也不能执行，我们需要用到更复杂的机制来解决STW的问题。
 
 ##### 三色抽象
 
@@ -7741,7 +7741,7 @@ func (c *mcache) allocLarge(size uintptr, needzero bool, noscan bool) *mspan {
 
 本来不应该被回收的对象却被回收了，这在内存管理中是非常严重的错误，我们将这种错误称为**悬挂指针**，即指针没有指向特定类型的合法对象，影响了内存的安全性，想要并发或者增量地标记对象还是需要使用屏障技术。
 
-##### 屏障技术
+##### 屏障技术🔖
 
 内存屏障技术是一种屏障指令，它可以让 CPU 或者编译器在执行内存相关操作时遵循特定的约束，目前多数的现代处理器都会乱序执行指令以最大化性能，但是该技术能够保证内存操作的顺序性，在内存屏障前执行的操作一定会先于内存屏障后执行的操作。
 
@@ -7758,7 +7758,7 @@ func (c *mcache) allocLarge(size uintptr, needzero bool, noscan bool) *mspan {
 
 我们在这里想要介绍的是 Go 语言中使用的两种写屏障技术，分别是 Dijkstra 提出的插入写屏障和 Yuasa 提出的删除写屏障，这里会分析它们如何保证三色不变性和垃圾收集器的正确性。
 
-###### 插入写屏障🔖
+###### 插入写屏障
 
 
 
@@ -7770,11 +7770,19 @@ func (c *mcache) allocLarge(size uintptr, needzero bool, noscan bool) *mspan {
 
 ##### 增量和并发
 
+
+
 ###### 增量收集器
 
 
 
 ###### 并发收集器
+
+并发（Concurrent）的垃圾收集不仅能够减少程序的最长暂停时间，还能减少整个垃圾收集阶段的时间，通过开启读写屏障、**利用多核优势与用户程序并行执行**，并发垃圾收集器确实能够减少垃圾收集对应用程序的影响：
+
+![图 7-31 并发垃圾收集器](images/2020-03-16-15843705141871-concurrent-collector.png)
+
+虽然并发收集器能够与用户程序一起运行，但是并不是所有阶段都可以与用户程序一起运行，部分阶段还是需要暂停用户程序的，不过与传统的算法相比，并发的垃圾收集可以将能够并发执行的工作尽量并发执行；当然，因为读写屏障的引入，并发的垃圾收集器也一定会带来额外开销，不仅会增加垃圾收集的总时间，还会影响用户程序，这是我们在设计垃圾收集策略时必须要注意的。
 
 #### 73.2.2 演进过程
 
@@ -7798,17 +7806,67 @@ func (c *mcache) allocLarge(size uintptr, needzero bool, noscan bool) *mspan {
 
 ##### 并发垃圾收集
 
+Go 语言在 v1.5 中引入了并发的垃圾收集器，该垃圾收集器使用了我们上面提到的三色抽象和写屏障技术保证垃圾收集器执行的正确性，如何实现并发的垃圾收集器在这里就不展开介绍了，我们来了解一些并发垃圾收集器的工作流程。
 
+首先，并发垃圾收集器必须在合适的时间点触发垃圾收集循环，假设我们的 Go 语言程序运行在一台 4 核的物理机上，那么在垃圾收集开始后，收集器会占用 25% 计算资源在后台来扫描并标记内存中的对象：
+
+![golang-concurrent-collector](images/2020-03-16-15843705141877-golang-concurrent-collector.png)
+
+**图 7-32 Go 语言的并发收集**
+
+Go 语言的并发垃圾收集器会在扫描对象之前暂停程序做一些标记对象的准备工作，其中包括启动后台标记的垃圾收集器以及开启写屏障，如果在后台执行的垃圾收集器不够快，应用程序申请内存的速度超过预期，运行时会让申请内存的应用程序辅助完成垃圾收集的扫描阶段，在标记和标记终止阶段结束之后就会进入异步的清理阶段，将不用的内存增量回收。
+
+v1.5 版本实现的并发垃圾收集策略由专门的 Goroutine 负责在处理器之间同步和协调垃圾收集的状态。当其他的 Goroutine 发现需要触发垃圾收集时，它们需要将该信息通知给负责修改状态的主 Goroutine，然而这个通知的过程会带来一定的延迟，这个延迟的时间窗口很可能是不可控的，用户程序会在这段时间继续分配内存。
+
+v1.6 引入了去中心化的垃圾收集协调机制，将垃圾收集器变成一个显式的状态机，任意的 Goroutine 都可以调用方法触发状态的迁移，常见的状态迁移方法包括以下几个
+
+- [`runtime.gcStart`](https://draven.co/golang/tree/runtime.gcStart) — 从 `_GCoff` 转换至 `_GCmark` 阶段，进入并发标记阶段并打开写屏障；
+- [`runtime.gcMarkDone`](https://draven.co/golang/tree/runtime.gcMarkDone) — 如果所有可达对象都已经完成扫描，调用 [`runtime.gcMarkTermination`](https://draven.co/golang/tree/runtime.gcMarkTermination)；
+- [`runtime.gcMarkTermination`](https://draven.co/golang/tree/runtime.gcMarkTermination) — 从 `_GCmark` 转换 `_GCmarktermination` 阶段，进入标记终止阶段并在完成后进入 `_GCoff`；
+
+上述的三个方法是在与 [runtime: replace GC coordinator with state machine](https://github.com/golang/go/issues/11970) 问题相关的提交中引入的，它们移除了过去中心化的状态迁移过程。
 
 ##### 回收堆目标
 
+STW 的垃圾收集器虽然需要暂停程序，但是它能够有效地控制堆内存的大小，Go 语言运行时的默认配置会在堆内存达到上一次垃圾收集的 2 倍时，触发新一轮的垃圾收集，这个行为可以通过环境变量 `GOGC` 调整，在默认情况下它的值为 100，即增长 100% 的堆内存才会触发 GC。
 
+![stop-the-world-garbage-collector-heap](images/2020-03-16-15843705141883-stop-the-world-garbage-collector-heap.png)
+
+**图 7-33 STW 垃圾收集器的垃圾收集时间**
+
+因为并发垃圾收集器会与程序一起运行，所以它无法准确的控制堆内存的大小，并发收集器需要在达到目标前触发垃圾收集，这样才能够保证内存大小的可控，并发收集器需要尽可能保证垃圾收集结束时的堆内存与用户配置的 `GOGC` 一致。
+
+![concurrent-garbage-collector-heap](images/2020-03-16-15843705141890-concurrent-garbage-collector-heap.png)
+
+**图 7-34 并发收集器的堆内存**
+
+Go 语言 v1.5 引入并发垃圾收集器的同时使用垃圾收集调步（Pacing）算法计算触发的垃圾收集的最佳时间，确保触发的时间既不会浪费计算资源，也不会超出预期的堆大小。如上图所示，其中黑色的部分是上一次垃圾收集后标记的堆大小，绿色部分是上次垃圾收集结束后新分配的内存，因为我们使用并发垃圾收集，所以黄色的部分就是在垃圾收集期间分配的内存，最后的红色部分是垃圾收集结束时与目标的差值，我们希望尽可能减少红色部分内存，降低垃圾收集带来的额外开销以及程序的暂停时间。
+
+垃圾收集调步算法是跟随 v1.5 一同引入的，该算法的目标是优化堆的增长速度和垃圾收集器的 CPU 利用率，而在 v1.10 版本中又对该算法进行了优化，将原有的目的堆大小拆分成了软硬两个目标，因为调整垃圾收集的执行频率涉及较为复杂的公式，对理解垃圾收集原理帮助较为有限，本节就不展开介绍了，感兴趣的读者可以自行阅读。
 
 ##### 混合写屏障
 
+在 Go 语言 v1.7 版本之前，运行时会使用 Dijkstra 插入写屏障保证强三色不变性，但是运行时并没有在所有的垃圾收集根对象上开启插入写屏障。因为应用程序可能包含成百上千的 Goroutine，而垃圾收集的根对象一般包括全局变量和栈对象，如果运行时需要在几百个 Goroutine 的栈上都开启写屏障，会带来巨大的额外开销，所以 Go 团队在实现上选择了在标记阶段完成时**暂停程序、将所有栈对象标记为灰色并重新扫描**，在活跃 Goroutine 非常多的程序中，重新扫描的过程需要占用 10 ~ 100ms 的时间。
+
+Go 语言在 v1.8 组合 Dijkstra 插入写屏障和 Yuasa 删除写屏障构成了如下所示的混合写屏障，该写屏障会**将被覆盖的对象标记成灰色并在当前栈没有扫描时将新对象也标记成灰色**：
+
+```go
+writePointer(slot, ptr):
+    shade(*slot)
+    if current stack is grey:
+        shade(ptr)
+    *slot = ptr
+```
+
+为了移除栈的重扫描过程，除了引入混合写屏障之外，在垃圾收集的标记阶段，我们还需要**将创建的所有新对象都标记成黑色**，防止新分配的栈内存和堆内存中的对象被错误地回收，因为栈内存在标记阶段最终都会变为黑色，所以不再需要重新扫描栈空间。
+
+#### 73.2.3 实现原理🔖
+
+先初步了解最新垃圾收集器的执行周期。
+
+Go 语言的垃圾收集可以分成清除终止、标记、标记终止和清除四个不同阶段，它们分别完成了不同的工作：
 
 
-#### 73.2.3 实现原理
 
 ##### 全局变量
 
@@ -7898,19 +7956,276 @@ type stack struct {
 1. 编译器会在编译阶段会通过 [`cmd/internal/obj/x86.stacksplit`](https://draven.co/golang/tree/cmd/internal/obj/x86.stacksplit) 在调用函数前插入 [`runtime.morestack`](https://draven.co/golang/tree/runtime.morestack) 或者 [`runtime.morestack_noctxt`](https://draven.co/golang/tree/runtime.morestack_noctxt) 函数；
 2. 运行时在创建新的 Goroutine 时会在 [`runtime.malg`](https://draven.co/golang/tree/runtime.malg) 中调用 [`runtime.stackalloc`](https://draven.co/golang/tree/runtime.stackalloc) 申请新的栈内存，并在编译器插入的 [`runtime.morestack`](https://draven.co/golang/tree/runtime.morestack) 中检查栈空间是否充足；
 
-需要注意的是，Go 语言的编译器不会为所有的函数插入 [`runtime.morestack`](https://draven.co/golang/tree/runtime.morestack)，它只会在必要时插入指令以减少运行时的额外开销，编译指令 `nosplit` 可以跳过栈溢出的检查，虽然这能降低一些开销，不过固定大小的栈也存在溢出的风险。本节将分别分析栈的初始化、创建 Goroutine 时栈的分配、编译器和运行时协作完成的栈扩容以及当栈空间利用率不足时的缩容过程。
+需要注意的是，Go语言的编译器不会为所有的函数插入 [`runtime.morestack`](https://draven.co/golang/tree/runtime.morestack)，它只会在必要时插入指令以减少运行时的额外开销，编译指令 `nosplit` 可以跳过栈溢出的检查，虽然这能降低一些开销，不过固定大小的栈也存在溢出的风险。本节将分别分析栈的初始化、创建 Goroutine 时栈的分配、编译器和运行时协作完成的栈扩容以及当栈空间利用率不足时的缩容过程。
 
 ##### 栈初始化
 
+栈空间在运行时中包含两个重要的全局变量，分别是 [`runtime.stackpool`](https://draven.co/golang/tree/runtime.stackpool) 和 [`runtime.stackLarge`](https://draven.co/golang/tree/runtime.stackLarge)，这两个变量分别表示全局的栈缓存和大栈缓存，前者可以分配小于 32KB 的内存，后者用来分配大于 32KB 的栈空间：
 
+```go
+var stackpool [_NumStackOrders]struct {
+	item stackpoolItem
+	_    [cpu.CacheLinePadSize - unsafe.Sizeof(stackpoolItem{})%cpu.CacheLinePadSize]byte
+}
+
+type stackpoolItem struct {
+	mu   mutex
+	span mSpanList
+}
+
+var stackLarge struct {
+	lock mutex
+	free [heapAddrBits - pageShift]mSpanList
+}
+```
+
+这两个用于分配空间的全局变量都与内存管理单元 [`runtime.mspan`](https://draven.co/golang/tree/runtime.mspan) 有关，我们可以认为 Go 语言的栈内存都是分配在堆上的，运行时初始化会调用 [`runtime.stackinit`](https://draven.co/golang/tree/runtime.stackinit) 初始化这些全局变量：
+
+```go
+func stackinit() {
+	for i := range stackpool {
+		stackpool[i].item.span.init()
+	}
+	for i := range stackLarge.free {
+		stackLarge.free[i].init()
+	}
+}
+```
+
+从调度器和内存分配的经验来看，如果运行时只使用全局变量来分配内存的话，势必会造成线程之间的锁竞争进而影响程序的执行效率，栈内存由于与线程关系比较密切，所以我们在每一个线程缓存 [`runtime.mcache`](https://draven.co/golang/tree/runtime.mcache) 中都加入了栈缓存减少锁竞争影响。
+
+```go
+type mcache struct {
+	stackcache [_NumStackOrders]stackfreelist
+}
+
+type stackfreelist struct {
+	list gclinkptr
+	size uintptr
+}
+```
+
+![stack-memory](images/2020-03-23-15849514795892-stack-memory.png)
+
+**图 7-47 线程栈缓存和全局栈缓存**
+
+运行时使用全局的 [`runtime.stackpool`](https://draven.co/golang/tree/runtime.stackpool) 和线程缓存中的空闲链表分配 32KB 以下的栈内存，使用全局的 [`runtime.stackLarge`](https://draven.co/golang/tree/runtime.stackLarge) 和堆内存分配 32KB 以上的栈内存，提高本地分配栈内存的性能。
 
 ##### 栈分配
 
+运行时会在 Goroutine 的初始化函数 [`runtime.malg`](https://draven.co/golang/tree/runtime.malg) 中调用 [`runtime.stackalloc`](https://draven.co/golang/tree/runtime.stackalloc) 分配一个大小足够栈内存空间，根据线程缓存和申请栈的大小，该函数会通过三种不同的方法分配栈空间：
 
+1. 如果栈空间较小，使用全局栈缓存或者线程缓存上固定大小的空闲链表分配内存；
+2. 如果栈空间较大，从全局的大栈缓存 [`runtime.stackLarge`](https://draven.co/golang/tree/runtime.stackLarge) 中获取内存空间；
+3. 如果栈空间较大并且 [`runtime.stackLarge`](https://draven.co/golang/tree/runtime.stackLarge) 空间不足，在堆上申请一片大小足够内存空间；
+
+我们在这里会按照栈的大小分两部分介绍运行时对栈空间的分配。在 Linux 上，`_FixedStack = 2048`、`_NumStackOrders = 4`、`_StackCacheSize = 32768`，也就是如果申请的栈空间小于 32KB，我们会在全局栈缓存池或者线程的栈缓存中初始化内存：
+
+```go
+func stackalloc(n uint32) stack {
+	thisg := getg()
+	var v unsafe.Pointer
+	if n < _FixedStack<<_NumStackOrders && n < _StackCacheSize {
+		order := uint8(0)
+		n2 := n
+		for n2 > _FixedStack {
+			order++
+			n2 >>= 1
+		}
+		var x gclinkptr
+		c := thisg.m.mcache
+		if stackNoCache != 0 || c == nil || thisg.m.preemptoff != "" {
+			x = stackpoolalloc(order)
+		} else {
+			x = c.stackcache[order].list
+			if x.ptr() == nil {
+				stackcacherefill(c, order)
+				x = c.stackcache[order].list
+			}
+			c.stackcache[order].list = x.ptr().next
+			c.stackcache[order].size -= uintptr(n)
+		}
+		v = unsafe.Pointer(x)
+	} else {
+		...
+	}
+	...
+}
+```
+
+[`runtime.stackpoolalloc`](https://draven.co/golang/tree/runtime.stackpoolalloc) 会在全局的栈缓存池 [`runtime.stackpool`](https://draven.co/golang/tree/runtime.stackpool) 中获取新的内存，如果栈缓存池中不包含剩余的内存，运行时会从堆上申请一片内存空间；如果线程缓存中包含足够的空间，我们可以从线程本地的缓存中获取内存，一旦发现空间不足就会调用 [`runtime.stackcacherefill`](https://draven.co/golang/tree/runtime.stackcacherefill) 从堆上获取新的内存。
+
+如果 Goroutine 申请的内存空间过大，运行时会查看 [`runtime.stackLarge`](https://draven.co/golang/tree/runtime.stackLarge) 中是否有剩余的空间，如果不存在剩余空间，它也会从堆上申请新的内存：
+
+```go
+func stackalloc(n uint32) stack {
+	...
+	if n < _FixedStack<<_NumStackOrders && n < _StackCacheSize {
+		...
+	} else {
+		var s *mspan
+		npage := uintptr(n) >> _PageShift
+		log2npage := stacklog2(npage)
+
+		if !stackLarge.free[log2npage].isEmpty() {
+			s = stackLarge.free[log2npage].first
+			stackLarge.free[log2npage].remove(s)
+		}
+
+		if s == nil {
+			s = mheap_.allocManual(npage, &memstats.stacks_inuse)
+			osStackAlloc(s)
+			s.elemsize = uintptr(n)
+		}
+		v = unsafe.Pointer(s.base())
+	}
+
+	return stack{uintptr(v), uintptr(v) + uintptr(n)}
+}
+```
+
+需要注意的是，因为 OpenBSD 6.4+ 对栈内存有特殊的需求，所以只要我们从堆上申请栈内存，需要调用 [`runtime.osStackAlloc`](https://draven.co/golang/tree/runtime.osStackAlloc) 做一些额外处理，然而其他的操作系统就没有这种限制了。
 
 ##### 栈扩容
 
+编译器会在 [`cmd/internal/obj/x86.stacksplit`](https://draven.co/golang/tree/cmd/internal/obj/x86.stacksplit) 中为函数调用插入 [`runtime.morestack`](https://draven.co/golang/tree/runtime.morestack) 运行时检查，它会在几乎所有的函数调用之前检查当前 Goroutine 的栈内存是否充足，如果当前栈需要扩容，我们会保存一些栈的相关信息并调用 [`runtime.newstack`](https://draven.co/golang/tree/runtime.newstack) 创建新的栈：
 
+```go
+func newstack() {
+	thisg := getg()
+	gp := thisg.m.curg
+	...
+	preempt := atomic.Loaduintptr(&gp.stackguard0) == stackPreempt
+	if preempt {
+		if !canPreemptM(thisg.m) {
+			gp.stackguard0 = gp.stack.lo + _StackGuard
+			gogo(&gp.sched)
+		}
+	}
+
+	sp := gp.sched.sp
+	if preempt {
+		if gp.preemptShrink {
+			gp.preemptShrink = false
+			shrinkstack(gp)
+		}
+
+		if gp.preemptStop {
+			preemptPark(gp)
+		}
+
+		gopreempt_m(gp)
+	}
+	...
+}
+```
+
+[`runtime.newstack`](https://draven.co/golang/tree/runtime.newstack) 会先做一些准备工作并检查当前 Goroutine 是否发出了抢占请求，如果发出了抢占请求：
+
+1. 当前线程可以被抢占时，直接调用 [`runtime.gogo`](https://draven.co/golang/tree/runtime.gogo) 触发调度器的调度；
+2. 如果当前 Goroutine 在垃圾回收被 [`runtime.scanstack`](https://draven.co/golang/tree/runtime.scanstack) 标记成了需要收缩栈，调用 [`runtime.shrinkstack`](https://draven.co/golang/tree/runtime.shrinkstack)；
+3. 如果当前 Goroutine 被 [`runtime.suspendG`](https://draven.co/golang/tree/runtime.suspendG) 函数挂起，调用 [`runtime.preemptPark`](https://draven.co/golang/tree/runtime.preemptPark) 被动让出当前处理器的控制权并将 Goroutine 的状态修改至 `_Gpreempted`；
+4. 调用 [`runtime.gopreempt_m`](https://draven.co/golang/tree/runtime.gopreempt_m) 主动让出当前处理器的控制权；
+
+如果当前 Goroutine 不需要被抢占，意味着我们需要新的栈空间来支持函数调用和本地变量的初始化，运行时会先检查目标大小的栈是否会溢出：
+
+```go
+func newstack() {
+	...
+	oldsize := gp.stack.hi - gp.stack.lo
+	newsize := oldsize * 2
+	if newsize > maxstacksize {
+		print("runtime: goroutine stack exceeds ", maxstacksize, "-byte limit\n")
+		print("runtime: sp=", hex(sp), " stack=[", hex(gp.stack.lo), ", ", hex(gp.stack.hi), "]\n")
+		throw("stack overflow")
+	}
+
+	casgstatus(gp, _Grunning, _Gcopystack)
+	copystack(gp, newsize)
+	casgstatus(gp, _Gcopystack, _Grunning)
+	gogo(&gp.sched)
+}
+```
+
+如果目标栈的大小没有超出程序的限制，我们会将 Goroutine 切换至 `_Gcopystack` 状态并调用 [`runtime.copystack`](https://draven.co/golang/tree/runtime.copystack) 开始栈拷贝。在拷贝栈内存之前，运行时会通过 [`runtime.stackalloc`](https://draven.co/golang/tree/runtime.stackalloc) 分配新的栈空间：
+
+```go
+func copystack(gp *g, newsize uintptr) {
+	old := gp.stack
+	used := old.hi - gp.sched.sp
+
+	new := stackalloc(uint32(newsize))
+	...
+}
+```
+
+新栈的初始化和数据的复制是一个比较简单的过程，不过这不是整个过程中最复杂的地方，我们还需要将指向源栈中内存指向新的栈，在这期间我们需要分别调整以下的指针：
+
+1. 调用 [`runtime.adjustsudogs`](https://draven.co/golang/tree/runtime.adjustsudogs) 或者 [`runtime.syncadjustsudogs`](https://draven.co/golang/tree/runtime.syncadjustsudogs) 调整 [`runtime.sudog`](https://draven.co/golang/tree/runtime.sudog) 结构体的指针；
+2. 调用 [`runtime.memmove`](https://draven.co/golang/tree/runtime.memmove) 将源栈中的整片内存拷贝到新的栈中；
+3. 调用 [`runtime.adjustctxt`](https://draven.co/golang/tree/runtime.adjustctxt)、[`runtime.adjustdefers`](https://draven.co/golang/tree/runtime.adjustdefers) 和 [`runtime.adjustpanics`](https://draven.co/golang/tree/runtime.adjustpanics) 调整剩余 Goroutine 相关数据结构的指针；
+
+```go
+func copystack(gp *g, newsize uintptr) {
+	...
+	var adjinfo adjustinfo
+	adjinfo.old = old
+	adjinfo.delta = new.hi - old.hi // 计算新栈和旧栈之间内存地址差
+
+	ncopy := used
+	if !gp.activeStackChans {
+		adjustsudogs(gp, &adjinfo)
+	} else {
+		adjinfo.sghi = findsghi(gp, old)
+		ncopy -= syncadjustsudogs(gp, used, &adjinfo)
+	}
+
+	memmove(unsafe.Pointer(new.hi-ncopy), unsafe.Pointer(old.hi-ncopy), ncopy)
+
+	adjustctxt(gp, &adjinfo)
+	adjustdefers(gp, &adjinfo)
+	adjustpanics(gp, &adjinfo)
+
+	gp.stack = new
+	gp.stackguard0 = new.lo + _StackGuard
+	gp.sched.sp = new.hi - used
+	gp.stktopsp += adjinfo.delta
+	...
+	stackfree(old)
+}
+```
+
+调整指向栈内存的指针都会调用 [`runtime.adjustpointer`](https://draven.co/golang/tree/runtime.adjustpointer)，该函数会利用 [`runtime.adjustinfo`](https://draven.co/golang/tree/runtime.adjustinfo) 计算的新栈和旧栈之间的内存地址差来调整指针。所有的指针都被调整后，我们就可以更新 Goroutine 的几个变量并通过 [`runtime.stackfree`](https://draven.co/golang/tree/runtime.stackfree) 释放原始栈的内存空间了。
 
 ##### 栈缩容
 
+[`runtime.shrinkstack`](https://draven.co/golang/tree/runtime.shrinkstack) 栈缩容时调用的函数，该函数的实现原理非常简单，其中大部分都是检查是否满足缩容前置条件的代码，核心逻辑只有以下这几行：
+
+```go
+func shrinkstack(gp *g) {
+	...
+	oldsize := gp.stack.hi - gp.stack.lo
+	newsize := oldsize / 2
+	if newsize < _FixedStack {
+		return
+	}
+	avail := gp.stack.hi - gp.stack.lo
+	if used := gp.stack.hi - gp.sched.sp + _StackLimit; used >= avail/4 {
+		return
+	}
+
+	copystack(gp, newsize)
+}
+```
+
+如果要触发栈的缩容，新栈的大小会是原始栈的一半，不过如果新栈的大小低于程序的最低限制 2KB，那么缩容的过程就会停止。
+
+![shrink-stacks](images/2020-03-23-15849514795902-shrink-stacks.png)
+
+**图 7-48 栈的缩容操作**
+
+运行时只会在栈内存使用不足 1/4 时进行缩容，缩容也会调用扩容时使用的 [`runtime.copystack`](https://draven.co/golang/tree/runtime.copystack) 开辟新的栈空间。
+
+#### 73.3.3 小结 
+
+栈内存是应用程序中重要的内存空间，它能够支持本地的局部变量和函数调用，栈空间中的变量会与栈一同创建和销毁，这部分内存空间不需要工程师过多的干预和管理，现代的编程语言通过逃逸分析减少了我们的工作量，理解栈空间的分配对于理解 Go 语言的运行时有很大的帮助。
