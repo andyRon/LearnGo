@@ -1,7 +1,9 @@
 深入剖析Kubernetes
 ----
 
+[深入剖析Kubernetes](https://time.geekbang.org/column/intro/100015201) 2018
 
+[《深入剖析Kubernetes》](https://book.douban.com/subject/35424872/) 2021
 
 # 一、Kubernetes基础
 
@@ -12,6 +14,12 @@
 ## 2 容器技术基础
 
 5-8
+
+2.1 
+
+小结
+
+![](images/image-20250829130240180.png)
 
 ## 3 Kubernetes设计与架构
 
