@@ -2909,9 +2909,18 @@ bpool是基于Channel实现的，不像sync.Pool为了提高性能而做了很�
 
 ## 11 Context：信息穿透上下文
 
+上下文呢就是指**在API之间或者方法调用之间，所传递的除了业务参数之外的额外信息**。
+
+Context还提供了超时（Timeout）和取消（Cancel）的机制。
+
 ### 11.1 Context的来历
 
+很多的Web应用框架，都切换成了标准库的Context。标准库中的database/sql、os/exec、net、net/http等包中都使用到了Context。而且，如果我们遇到了下面的一些场景，也可以考虑使用Context：
 
+- 上下文信息传递 （request-scoped），比如处理http请求、在请求处理链路上传递信息；
+- 控制子goroutine的运行；
+- 超时控制的方法调用；
+- 可以取消的方法调用。
 
 ### 11.2 Context基本使用方法
 
@@ -2928,24 +2937,162 @@ type Context interface {
 
 - Deadline方法会返回这个Context被取消的截止日期。如果没有设置截止日期，ok的值是false。后续每次调用这个对象的Deadline方法时，都会返回和第一次调用相同的结果。
 
-- Done方法返回一个Channel对象。在Context被取消时，此Channel会被close，如果没被取消，可能会返回nil。后续的Done调用总是返回相同的结果。当Done被close的时候，你可以通过ctx.Err获取错误信息。Done这个方法名其实起得并不好，因为名字太过笼统，不能明确反映Done被close的原因，因为cancel、timeout、deadline都可能导致Done被close，不过，目前还没有一个更合适的方法名称。
+- Done方法返回一个Channel对象。在Context被取消时，此Channel会被close，如果没被取消，可能会返回nil。后续的Done调用总是返回相同的结果。当Done被close的时候，你可以通过ctx.Err获取错误信息。**Done这个方法名其实起得并不好，因为名字太过笼统，不能明确反映Done被close的原因，因为cancel、timeout、deadline都可能导致Done被close**，不过，目前还没有一个更合适的方法名称。
 
   关于Done方法，你必须要记住的知识点就是：如果Done没有被close，Err方法返回nil；如果Done被close，Err方法会返回Done被close的原因。
 
 - Value返回此ctx中和指定的key相关联的value。
 
-Context中实现了2个常用的生成顶层Context的方法。
+Context中实现了2个常用的**生成顶层Context的方法**。
 
-- context.Background()：返回一个非nil的、空的Context，没有任何值，不会被cancel，不会超时，没有截止日期。一般用在主函数、初始化、测试以及创建根Context的时候。
+- context.Background()：返回一个非nil的、空的Context，没有任何值，不会被cancel，不会超时，没有截止日期。一般用在**主函数、初始化、测试以及创建根Context的时候**。
 - context.TODO()：返回一个非nil的、空的Context，没有任何值，不会被cancel，不会超时，没有截止日期。当你不清楚是否该用Context，或者目前还不知道要传递一些什么上下文信息的时候，就可以使用这个方法。
 
 
 
-
+在使用Context的时候，有一些约定俗成的规则。
+1.  一般函数使用Context的时候，会把这个参数放在第一个参数的位置。
+2.  从来不把nil当做Context类型的参数值，可以使用context.Background()创建一个空的上下文对象，也不要使用nil。
+3.  Context只用来**临时做函数之间的上下文透传，不能持久化Context或者把Context长久保存**。把Context持久化到数据库、本地文件或者全局变量、缓存中都是错误的用法。
+4.  key的类型不应该是字符串类型或者其它内建类型，否则容易在包之间使用Context时候产生冲突。使用WithValue时，key的类型应该是自己定义的类型。
+5.  常常使用struct{}作为底层类型定义key的类型。对于exported key的静态类型，常常是接口或者指针。这样可以尽量减少内存分配。
 
 ### 11.3 创建特殊用途Context的方法
 
+#### WithValue
 
+WithValue基于parent Context生成一个新的Context，保存了一个key-value键值对。它常常用来传递上下文。WithValue方法其实是创建了一个类型为valueCtx的Context，它的类型定义如下：
+
+```go
+type valueCtx struct {
+	Context
+	key, val any
+}
+```
+
+它持有一个key-value键值对，还持有parent的Context。它覆盖了Value方法，优先从自己的存储中检查这个key，不存在的话会从parent中继续检查。
+
+Go标准库实现的Context还实现了链式查找。如果不存在，还会向parent Context去查找，如果parent还是valueCtx的话，还是遵循相同的原则：valueCtx会嵌入parent，所以还是会查找parent的Value方法的。
+
+```go
+func main() {
+	ctx := context.TODO()
+	ctx = context.WithValue(ctx, "key1", "0001")
+	ctx = context.WithValue(ctx, "key2", "0002")
+	ctx = context.WithValue(ctx, "key3", "0003")
+	ctx = context.WithValue(ctx, "key4", "0004")
+
+	fmt.Println(ctx.Value("key1"))
+}
+```
+
+![](images/image-20251129144013282.png)
+
+#### WithCancel
+
+WithCancel 方法返回parent的副本，只是副本中的Done Channel是新建的对象，它的类型是`cancelCtx`。
+
+我们常常在一些需要主动取消长时间的任务时，创建这种类型的Context，然后把这个Context传给长时间执行任务的goroutine。当需要中止任务时，我们就可以cancel这个Context，这样长时间执行任务的goroutine，就可以通过检查这个Context，知道Context已经被取消了。
+
+WithCancel返回值中的第二个值是一个cancel函数。其实，这个返回值的名称（cancel）和类型（Cancel）也非常迷惑人。
+
+记住，不是只有你想中途放弃，才去调用cancel，只要你的任务正常完成了，就需要调用cancel，这样，这个Context才能释放它的资源（通知它的children 处理cancel，从它的parent中把自己移除，甚至释放相关的goroutine）。很多同学在使用这个方法的时候，都会忘记调用cancel，切记切记，而且一定尽早释放。
+
+```go
+func WithCancel(parent Context) (ctx Context, cancel CancelFunc) {
+	c := withCancel(parent)
+	return c, func() { c.cancel(true, Canceled, nil) }
+}
+
+func withCancel(parent Context) *cancelCtx {
+	if parent == nil {
+		panic("cannot create context from nil parent")
+	}
+	c := &cancelCtx{}
+	c.propagateCancel(parent, c)  // 把c朝上传播
+	return c
+}
+```
+
+propagateCancel方法会顺着parent路径往上找，直到找到一个cancelCtx，或者为nil。如果不为空，就把自己加入到这个cancelCtx的child，以便这个cancelCtx被取消的时候通知自己。如果为空，会新起一个goroutine，由它来监听parent的Done是否已关闭。
+
+当这个cancelCtx的cancel函数被调用的时候，或者parent的Done被close的时候，这个cancelCtx的Done才会被close。
+
+cancel是向下传递的，如果一个WithCancel生成的Context被cancel时，如果它的子Context（也有可能是孙，或者更低，依赖子的类型）也是cancelCtx类型的，就会被cancel，但是不会向上传递。parent Context不会因为子Context被cancel而cancel。
+
+cancelCtx被取消时，它的Err字段就是下面这个Canceled错误：
+
+```go
+var Canceled = errors.New("context canceled")
+```
+
+#### WithTimeout
+
+WithTimeout其实是和WithDeadline一样，只不过一个参数是超时时间，一个参数是截止时间。超时时间加上当前时间，其实就是截止时间，因此，WithTimeout的实现是：
+
+```go
+func WithTimeout(parent Context, timeout time.Duration) (Context, CancelFunc) {
+	return WithDeadline(parent, time.Now().Add(timeout))  // 当前时间+timeout就是deadline
+}
+```
+
+#### WithDeadline
+
+WithDeadline会返回一个parent的副本，并且设置了一个不晚于参数d的截止时间，类型为timerCtx（或者是cancelCtx）。
+
+如果它的截止时间晚于parent的截止时间，那么就以parent的截止时间为准，并返回一个类型为cancelCtx的Context，因为parent的截止时间到了，就会取消这个cancelCtx。
+
+如果当前时间已经超过了截止时间，就直接返回一个已经被cancel的timerCtx。否则就会启动一个定时器，到截止时间取消这个timerCtx。
+
+综合起来，timerCtx的Done被Close掉，主要是由下面的某个事件触发的：
+
+- 截止时间到了；
+- cancel函数被调用；
+- parent的Done被close。
+
+```go
+func WithDeadline(parent Context, d time.Time) (Context, CancelFunc) {
+	return WithDeadlineCause(parent, d, nil)
+}
+
+func WithDeadlineCause(parent Context, d time.Time, cause error) (Context, CancelFunc) {
+	if parent == nil {
+		panic("cannot create context from nil parent")
+	}
+  // 如果parent的截止时间更早，直接返回一个cancelCtx即可
+	if cur, ok := parent.Deadline(); ok && cur.Before(d) {
+		return WithCancel(parent)
+	}
+	c := &timerCtx{
+		deadline: d,
+	}
+	c.cancelCtx.propagateCancel(parent, c)
+	dur := time.Until(d)
+	if dur <= 0 {
+		c.cancel(true, DeadlineExceeded, cause) // deadline has already passed
+		return c, func() { c.cancel(false, Canceled, nil) }
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.err == nil {
+    // 设置一个定时器，到截止时间后取消
+		c.timer = time.AfterFunc(dur, func() {
+			c.cancel(true, DeadlineExceeded, cause)
+		})
+	}
+	return c, func() { c.cancel(true, Canceled, nil) }
+}
+```
+
+和cancelCtx一样，WithDeadline（WithTimeout）返回的cancel一定要调用，并且要尽可能早地被调用，这样才能尽早释放资源，不要单纯地依赖截止时间被动取消。正确的使用姿势：
+
+```go
+func slowOperationWithTimeout(ctx context.Context) (Result, error) {
+	ctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	defer cancel() // 一旦慢操作完成就立马调用cancel
+	return slowOperation(ctx)
+}
+```
 
 
 
@@ -3002,7 +3149,7 @@ func main() {
 
 所以，**如果要想保证原子操作，切记一定要使用 atomic 提供的方法**。
 
-### 12.2 atomic原子操作的应用场景
+### 12.2 atomic原子操作的应用场景🔖
 
 
 
@@ -3138,7 +3285,7 @@ Channel 是 Go 语言内建的 first-class 类型，也是 Go 语言与众不同
 
 
 
-Channel类型是Go语言内置的类型，你无需引入某个包，就能使用它。虽然Go也提供了传统的并发原语，但是它们都是通过库的方式提供的，你必须要引入sync包或者atomic包才能使用它们，而Channel就不一样了，它是内置类型，使用起来非常方便
+Channel类型是Go语言内置的类型，你无需引入某个包，就能使用它。虽然Go也提供了传统的并发原语，但是它们都是通过库的方式提供的，你必须要引入sync包或者atomic包才能使用它们，而Channel就不一样了，它是内置类型，使用起来非常方便。
 
 ### 13.2 Channel的应用场景
 
@@ -3162,7 +3309,7 @@ Channel类型是Go语言内置的类型，你无需引入某个包，就能使�
 4. ==任务编排==：可以让一组goroutine按照一定的顺序并发或者串行的执行，这就是编排的功能。
 5. ==锁==：利用Channel也可以实现互斥锁的机制。
 
-### 13.3 Channel基本用法
+### 13.3 Channel基本用法🔖
 
 
 
@@ -3773,7 +3920,7 @@ func main() {
 
 ### 总结
 
-
+虽然Channel最初是基于CSP设计的用于goroutine之间的消息传递的一种数据类型，但是，除了消息传递这个功能之外，大家居然还演化出了各式各样的应用模式。我不确定Go的创始人在设计这个类型的时候，有没有想到这一点，但是，我确实被各位大牛利用Channel的各种点子折服了，比如有人实现了一个基于TCP网络的分布式的Channel。
 
 ![](images/image-20250221004656361.jpeg)
 
@@ -3796,7 +3943,7 @@ Go官方文档里专门介绍了Go的内存模型，你不要误解这里的内�
 
 ### 15.1 重排和可见性的问题
 
-
+由于指令重排，代码并不一定会按照你写的顺序执行。
 
 
 
@@ -3995,6 +4142,12 @@ func (s *Weighted) Release(n int64) {
 
 
 ### 总结
+
+标准库中实现基本并发原语（比如Mutex）的时候，强烈依赖信号量实现等待队列和通知唤醒，但是，标准库中却没有把这个实现直接暴露出来放到标准库，而是通过第三库提供。
+
+
+
+
 
 ![](images/image-20250221150814734.png)
 
